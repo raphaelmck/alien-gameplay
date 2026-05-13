@@ -1,6 +1,7 @@
 from manim import *
 from manim.utils.rate_functions import ease_out_quad
 import numpy as np
+from PIL import Image
 
 
 class GamesAsMathObjects(Scene):
@@ -27,6 +28,7 @@ class GamesAsMathObjects(Scene):
         self.SP = self.SIDE / (self.N - 1)
 
         m = {}
+        self._phase_book_intro(m)
         self._phase_board(m)
         self._phase_state(m)
         self._phase_action(m)
@@ -49,6 +51,24 @@ class GamesAsMathObjects(Scene):
         return c
 
     # ─── phases ───────────────────────────────────────────────────────
+
+    def _phase_book_intro(self, m):
+        raw = Image.open("src/scenes/book-icon.png")
+        w, h = raw.size
+        cx = int(w * 0.10)   # 10 % off each side removes black margins + bottom-right watermark
+        cropped = raw.crop((cx, 0, w - cx, h))
+        book_img = ImageMobject(np.array(cropped)).set_height(2.2)
+        book_img.move_to(RIGHT * 3.5)
+        theory_lbl = Text("Theory", font_size=28, color=GRAY_B)
+        theory_lbl.next_to(book_img, UP, buff=0.18)
+
+        self.play(FadeIn(book_img, scale=0.82), run_time=0.9)
+        self.play(Write(theory_lbl), run_time=0.6)
+        self.wait(0.7)
+
+        m["book_img"]   = book_img
+        m["theory_lbl"] = theory_lbl
+        m["book_center"] = book_img.get_center().copy()
 
     def _phase_board(self, m):
         bg = Square(side_length=self.SIDE + 0.35)
@@ -79,20 +99,7 @@ class GamesAsMathObjects(Scene):
             s.move_to(self.gp(i, j))
             stones.add(s)
 
-        # Book icon + label on the right
-        book_img = ImageMobject("src/scenes/book-icon.png").set_height(2.2)
-        book_img.move_to(RIGHT * 3.5)
-        theory_lbl = Text("Theory", font_size=28, color=GRAY_B)
-        theory_lbl.next_to(book_img, UP, buff=0.18)
-        book_group = Group(book_img, theory_lbl)
-
-        # Board and book appear together; "Theory" writes in after
-        self.play(
-            GrowFromCenter(bg),
-            FadeIn(book_img, scale=0.82),
-            run_time=0.9,
-        )
-        self.play(Write(theory_lbl), run_time=0.55)
+        self.play(GrowFromCenter(bg), run_time=0.9)
         self.play(
             LaggedStart(*[Create(l) for l in lines], lag_ratio=0.03),
             run_time=1.0,
@@ -104,7 +111,6 @@ class GamesAsMathObjects(Scene):
         self.wait(0.3)
 
         m["bg"], m["lines"], m["stones"] = bg, lines, stones
-        m["book_group"] = book_group
 
     def _phase_state(self, m):
         brace = Brace(m["bg"], UP, color=self.C_STATE, buff=0.15)
@@ -187,15 +193,21 @@ class GamesAsMathObjects(Scene):
         r_eq.set_color(WHITE)
         r_lbl = Text("reward", font_size=24, color=GRAY_C)
         r_grp = VGroup(r_eq, r_lbl).arrange(DOWN, buff=0.18)
-        # Morph the book into the reward — inherits the book's centre position,
-        # which also fixes the "too low" placement from before.
-        r_grp.move_to(m["book_group"].get_center())
+        r_grp.move_to(m["book_center"])
 
+        # Step 1: book collapses into its own centre (accelerating shrink)
         self.play(
-            FadeOut(m["book_group"], scale=0.8),
-            FadeIn(r_grp, scale=1.1),
-            run_time=1.0,
+            m["book_img"].animate.scale(0.04).set_opacity(0),
+            m["theory_lbl"].animate.scale(0.04).set_opacity(0),
+            run_time=0.6,
+            rate_func=rush_from,
         )
+        self.remove(m["book_img"], m["theory_lbl"])
+
+        # Step 2: reward formula grows from the same point
+        self.play(GrowFromCenter(r_eq), run_time=0.85)
+        self.play(FadeIn(r_lbl, shift=UP * 0.1), run_time=0.4)
+
         # Colour only the three number tokens
         self.play(
             r_eq[1].animate.set_color(self.C_LOSS),
