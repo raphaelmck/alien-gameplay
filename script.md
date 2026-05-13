@@ -105,14 +105,18 @@ This should be the first major algorithmic explanation.
 
 **Voiceover:**
 
-> In a two-player zero-sum game, your gain is your opponent’s loss.
->
-> So the first great idea is recursive.
->
-> On my turn, I choose the move with the highest future value.
-> On your turn, you choose the move with the lowest future value for me.
->
-> This is minimax.
+In a two-player zero-sum game, your gain is exactly your opponent’s loss.
+
+That means a position is not good just because it gives you an exciting possibility. It is good only if your opponent cannot refute it.
+
+So the value of a position depends on the values of the positions one move later. And those positions depend on the positions after that.
+
+This is why the first great idea is recursive: define the value of a position by looking at the values of its children in the game tree.
+
+On your turn, take the maximum.
+On your opponent’s turn, take the minimum.
+
+That is minimax.
 
 **On screen:**
 
@@ -135,13 +139,6 @@ choose a* = argmax_a V(T(s, a))
 * Values propagate upward.
 * Max nodes choose largest child.
 * Min nodes choose smallest child.
-
-**Engaging line:**
-
-> A good move is not the move with the best dream.
-> It is the move with the best nightmare.
-
-This line should stay.
 
 ---
 
