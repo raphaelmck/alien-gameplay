@@ -4,7 +4,6 @@ import numpy as np
 
 
 def _ease_out_back(t):
-    """Slight overshoot so stones feel like they're being stamped onto the board."""
     c1 = 1.70158
     c3 = c1 + 1
     return 1 + c3 * (t - 1) ** 3 + c1 * (t - 1) ** 2
@@ -24,9 +23,6 @@ class Move37ColdOpen(ThreeDScene):
 
         self.camera.background_color = "#000000"
 
-        # Start at -128° so the ~38° of ambient rotation during the 36-move
-        # sequence (11 s × 0.06 rad/s) lands near -90°, keeping the top-down
-        # camera transition short and natural.
         self.set_camera_orientation(phi=65 * DEGREES, theta=-128 * DEGREES)
         self.create_and_add_board_elements()
 
@@ -35,16 +31,24 @@ class Move37ColdOpen(ThreeDScene):
         self.stop_ambient_camera_rotation()
 
         self.transition_to_top_down()
+
+        # Attention field appears *before* move 37 so the viewer sees
+        # where human attention was concentrated, then watches the stone
+        # land in the quiet region outside those zones.
+        attention = self.create_attention_field()
+        caption = self.create_attention_caption()
+        self.add_fixed_in_frame_mobjects(caption)
+        self.play(FadeIn(attention), FadeIn(caption), run_time=2.2, rate_func=smooth)
+        self.wait(1.5)
+
         self.play_move_37()
 
-        # Heatmap reveals after move 37 lands — "here's where everyone was looking."
-        heatmap = self.create_heatmap()
-        legend = self.create_legend()
-        self.add_fixed_in_frame_mobjects(legend)
-        self.play(FadeIn(heatmap), FadeIn(legend), run_time=2.2, rate_func=smooth)
-        self.wait(2.5)
-        self.play(FadeOut(heatmap), FadeOut(legend), run_time=1.2)
-        self.wait(1.0)
+        annotation = self.create_move37_annotation()
+        self.add_fixed_in_frame_mobjects(annotation)
+        self.play(FadeIn(annotation), run_time=0.9, rate_func=smooth)
+        self.wait(2.2)
+        self.play(FadeOut(attention), FadeOut(caption), FadeOut(annotation), run_time=1.2)
+        self.wait(0.8)
 
     # ==========================================
     # HELPERS
@@ -62,7 +66,6 @@ class Move37ColdOpen(ThreeDScene):
         star_points = self.create_star_points()
 
         self.play(GrowFromCenter(board), FadeIn(support), run_time=2.0, rate_func=smooth)
-        # Grid crystallises from the centre outward.
         self.play(
             LaggedStart(*[GrowFromCenter(l) for l in grid_lines], lag_ratio=0.03),
             run_time=2.5,
@@ -119,73 +122,138 @@ class Move37ColdOpen(ThreeDScene):
         stone.set_stroke(color=stroke_col, width=0.8)
         return stone
 
-    def create_heatmap(self):
-        heatmap = VGroup()
-        # z=0.002: above the board surface, below the grid (0.015) and stones (0.025)
-        # so it reads as a background glow layer, not floating over pieces.
-        z = 0.002
-        # (cx, cy, max_radius, peak_opacity, hex_color)
-        # Concentrated on the corner fights active after move 36;
-        # intentionally absent near P10 (move 37) to emphasise the surprise.
+    # ------------------------------------------------------------------
+    # Rasterised attention field
+    # ------------------------------------------------------------------
+
+    def _gaussian_field(self, W: int, H: int, zones: list) -> np.ndarray:
+        """
+        Build a smooth scalar field by summing Gaussians at board positions.
+
+        zones: [(board_i, board_j, sigma_intersections, amplitude), ...]
+        Returns float32 (H, W) array clipped to [0, 1].
+        """
+        board_extent = self.BOARD_SIZE + 0.4  # physical size including border
+
+        field = np.zeros((H, W), dtype=np.float32)
+        xs = np.arange(W, dtype=np.float32)
+        ys = np.arange(H, dtype=np.float32)
+        gx, gy = np.meshgrid(xs, ys)
+
+        for ci, cj, sigma_int, amp in zones:
+            # Board position in Manim world units
+            bx = ci * self.SPACING - self.BOARD_SIZE / 2
+            by = cj * self.SPACING - self.BOARD_SIZE / 2
+            # Map to pixel space (row 0 = top of image = +y in world)
+            px = (bx + board_extent / 2) / board_extent * W
+            py = (board_extent / 2 - by) / board_extent * H
+            # Convert sigma from board-intersection units to pixels
+            sigma_px = sigma_int * self.SPACING / board_extent * W
+
+            field += amp * np.exp(
+                -((gx - px) ** 2 + (gy - py) ** 2) / (2.0 * sigma_px ** 2)
+            )
+
+        return np.clip(field, 0.0, 1.0)
+
+    def _field_to_rgba(self, field: np.ndarray, max_alpha: float = 0.72) -> np.ndarray:
+        """
+        Map a [0,1] scalar field to an RGBA uint8 image.
+        Color: warm amber-gold — no scientific rainbow palette.
+        Alpha: field^0.60 so edges fade gracefully without a hard edge.
+        """
+        f = field.astype(np.float32)
+        rgba = np.zeros((*f.shape, 4), dtype=np.uint8)
+        rgba[..., 0] = np.clip(f * 255,      0, 255).astype(np.uint8)  # R full
+        rgba[..., 1] = np.clip(f * 148,      0, 255).astype(np.uint8)  # G ~amber
+        rgba[..., 2] = np.clip(f *  25,      0, 255).astype(np.uint8)  # B trace
+        alpha = np.power(np.clip(f, 0, 1), 0.60) * max_alpha
+        rgba[..., 3] = np.clip(alpha * 255,  0, 255).astype(np.uint8)
+        return rgba
+
+    def create_attention_field(self) -> ImageMobject:
+        """
+        Soft amber glow over the board regions that hold human attention
+        after move 36. Move 37 at (14,9) intentionally falls outside the
+        bright zones — the visual asks 'where would you have looked?'
+        without claiming to be a probability distribution.
+
+        Sigma values are in board-intersection units; the corner fights
+        are broad and bright, isolated stones cast a gentler glow.
+        """
+        W, H = 512, 512
         zones = [
-            # Bottom-right corner cluster  (P4 / Q3 / R4 fights)
-            (15,  3, 1.40, 0.58, "#FF2200"),
-            (13,  2, 1.00, 0.42, "#FF4400"),
-            # Bottom-left corner cluster   (C4 / C6 / B4 / B5 fights)
-            ( 2,  4, 1.30, 0.54, "#FF2200"),
-            ( 3,  3, 0.90, 0.36, "#FF5522"),
-            # Right side near Q11 / R14    (White just extended here)
-            (15, 10, 1.10, 0.42, "#FF6600"),
-            (16, 13, 0.75, 0.30, "#FF8800"),
-            # Top-left area                (C16 Black influence)
-            ( 3, 15, 0.85, 0.32, "#FFAA00"),
-            ( 4, 14, 0.60, 0.22, "#FFBB22"),
-            # Top-right area               (Q16 / R15 influence)
-            (15, 15, 0.80, 0.25, "#FFAA00"),
-            (16, 14, 0.55, 0.18, "#FFBB44"),
+            # board_i  board_j  sigma  amplitude
+            # ── Bottom-right corner cluster ──────────────────────────
+            # P4 / Q3 / P3 / R4 / R6 — most moves landed here
+            (15,  3,   3.8,  0.92),
+            (13,  2,   3.0,  0.72),
+            (15,  2,   2.2,  0.55),   # Q3 / P3 sub-cluster
+            # ── Bottom-left corner cluster ───────────────────────────
+            # C4 / C3 / B3 / B4 / B5 / C5 / C6 / D5 / D3 / E4 / D2 / C7
+            ( 2,  4,   3.8,  0.88),
+            ( 3,  3,   3.0,  0.68),
+            ( 3,  2,   2.0,  0.50),   # D3 / D2 sub-cluster
+            # ── Right-side tension ───────────────────────────────────
+            # Q5 / R5 contest + Q11 / R14 / R15 / Q14 extensions
+            (15,  4,   2.2,  0.42),   # Q5 area
+            (15, 10,   2.2,  0.44),   # Q11 — last White move
+            (16, 13,   2.4,  0.46),   # R14 / R15 cluster
+            (15, 13,   1.8,  0.36),   # Q14
+            # ── Upper-left ───────────────────────────────────────────
+            ( 3, 15,   2.8,  0.50),   # C16 Black stone + influence
+            ( 4, 15,   2.0,  0.34),   # E16
+            ( 2, 12,   2.2,  0.34),   # C13 White extension
+            # ── Upper-right ──────────────────────────────────────────
+            (15, 15,   2.6,  0.44),   # Q16 Black stone
+            (16, 14,   2.0,  0.34),   # R15
+            # ── Isolated stones — softer halos ───────────────────────
+            ( 9,  3,   2.8,  0.34),   # K4
+            ( 8, 16,   2.2,  0.30),   # J17
+            ( 3,  9,   2.2,  0.28),   # D10
+            (13, 15,   2.0,  0.28),   # O16
         ]
-        n_rings = 28
-        for cx, cy, max_r, peak_op, color in zones:
-            cp = self.board_to_point(cx, cy, z_offset=z)
-            radii = np.linspace(0.03, max_r, n_rings)
-            # Gaussian decay: full brightness at centre, zero at the edge.
-            opacities = peak_op * np.exp(-4.5 * (radii / max_r) ** 2)
-            for r, op in zip(radii, opacities):
-                blob = Circle(radius=r, stroke_width=0, fill_color=color, fill_opacity=op)
-                blob.move_to(cp)
-                heatmap.add(blob)
-        return heatmap
 
-    def create_legend(self):
-        """Small fixed-frame legend: gradient bar + labels."""
-        stops = ["#3A7BD5", "#7FB3D3", "#FFD700", "#FF6B35", "#FF2200"]
-        n_segs, seg_w, seg_h = 45, 0.050, 0.14
-        bar = VGroup()
-        for i in range(n_segs):
-            t = i / (n_segs - 1)
-            f = t * (len(stops) - 1)
-            lo = ManimColor(stops[int(f)])
-            hi = ManimColor(stops[min(int(f) + 1, len(stops) - 1)])
-            col = interpolate_color(lo, hi, f - int(f))
-            seg = Rectangle(width=seg_w, height=seg_h,
-                            fill_color=col, fill_opacity=0.90, stroke_width=0)
-            seg.shift(RIGHT * i * seg_w)
-            bar.add(seg)
-        bar.center()
+        field = self._gaussian_field(W, H, zones)
+        rgba  = self._field_to_rgba(field, max_alpha=0.68)
 
-        title = Text(
-            "Expected move probability  (before move 37)",
-            font_size=12, color=ManimColor("#AAAAAA"),
+        img = ImageMobject(rgba)
+        img.set_width(self.BOARD_SIZE + 0.4)
+        img.move_to(ORIGIN)
+        # Place between board surface (z=0) and grid lines (z=0.015)
+        # so the grid and all stones render cleanly on top.
+        img.shift(np.array([0.0, 0.0, 0.005]))
+        return img
+
+    def create_move37_annotation(self) -> VGroup:
+        """Two-row card that appears after move 37 lands."""
+        lbl_color = ManimColor("#505050")
+
+        labels = VGroup(
+            Text("Human prior",   font_size=13, color=lbl_color),
+            Text("Machine value", font_size=13, color=lbl_color),
         )
-        title.next_to(bar, UP, buff=0.11)
-        low_lbl  = Text("low",  font_size=10, color=ManimColor("#777777"))
-        high_lbl = Text("high", font_size=10, color=ManimColor("#777777"))
-        low_lbl.next_to(bar,  LEFT,  buff=0.09)
-        high_lbl.next_to(bar, RIGHT, buff=0.09)
+        values = VGroup(
+            Text("unlikely", font_size=13, color=ManimColor("#787878")),
+            Text("high",     font_size=13, color=ManimColor("#D49A22")),
+        )
 
-        legend = VGroup(title, bar, low_lbl, high_lbl)
-        legend.to_corner(DR, buff=0.35)
-        return legend
+        labels.arrange(DOWN, aligned_edge=LEFT,  buff=0.16)
+        values.arrange(DOWN, aligned_edge=LEFT,  buff=0.16)
+        values.next_to(labels, RIGHT, buff=0.45)
+
+        group = VGroup(labels, values)
+        group.to_corner(DR, buff=0.38)
+        return group
+
+    def create_attention_caption(self) -> Text:
+        caption = Text(
+            "where the obvious fight seems to be",
+            font_size=14,
+            color=ManimColor("#585858"),
+        )
+        caption.to_corner(DL, buff=0.38)
+        return caption
 
     # ==========================================
     # ANIMATION SEQUENCES
@@ -205,10 +273,6 @@ class Move37ColdOpen(ThreeDScene):
             (9, 3),   (2, 12),  (4, 15),  (16, 13), (16, 14), (15, 13), (13, 15), (15, 10),
         ]
 
-        # All stones placed at their final positions first; one single play()
-        # call keeps the ambient camera rotation completely uninterrupted.
-        # _ease_out_back gives a confident "stamp" feel — each stone grows to
-        # ~107 % then snaps back, like it's being pressed onto the board.
         stone_anims = []
         for i, (cx, cy) in enumerate(moves):
             color = self.BLACK_STONE if (i % 2 == 0) else self.WHITE_STONE
@@ -234,7 +298,7 @@ class Move37ColdOpen(ThreeDScene):
         self.add(move37)
         self.play(move37.animate.move_to(dest), run_time=1.6, rate_func=ease_out_quad)
 
-        halo = Circle(radius=self.SPACING * 0.48, color=WHITE, stroke_width=3)
+        halo = Circle(radius=self.SPACING * 0.48, color=WHITE, stroke_width=2.5)
         halo.move_to(self.board_to_point(cx, cy, z_offset=0.03))
         self.add(halo)
-        self.play(halo.animate.scale(4).set_opacity(0), run_time=1.8, rate_func=ease_out_quad)
+        self.play(halo.animate.scale(5).set_opacity(0), run_time=2.2, rate_func=smooth)

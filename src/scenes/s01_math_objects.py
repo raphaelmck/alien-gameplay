@@ -79,7 +79,20 @@ class GamesAsMathObjects(Scene):
             s.move_to(self.gp(i, j))
             stones.add(s)
 
-        self.play(GrowFromCenter(bg), run_time=0.9)
+        # Book icon + label on the right
+        book_img = ImageMobject("src/scenes/book-icon.png").set_height(2.2)
+        book_img.move_to(RIGHT * 3.5)
+        theory_lbl = Text("Theory", font_size=28, color=GRAY_B)
+        theory_lbl.next_to(book_img, UP, buff=0.18)
+        book_group = Group(book_img, theory_lbl)
+
+        # Board and book appear together; "Theory" writes in after
+        self.play(
+            GrowFromCenter(bg),
+            FadeIn(book_img, scale=0.82),
+            run_time=0.9,
+        )
+        self.play(Write(theory_lbl), run_time=0.55)
         self.play(
             LaggedStart(*[Create(l) for l in lines], lag_ratio=0.03),
             run_time=1.0,
@@ -91,6 +104,7 @@ class GamesAsMathObjects(Scene):
         self.wait(0.3)
 
         m["bg"], m["lines"], m["stones"] = bg, lines, stones
+        m["book_group"] = book_group
 
     def _phase_state(self, m):
         brace = Brace(m["bg"], UP, color=self.C_STATE, buff=0.15)
@@ -173,9 +187,15 @@ class GamesAsMathObjects(Scene):
         r_eq.set_color(WHITE)
         r_lbl = Text("reward", font_size=24, color=GRAY_C)
         r_grp = VGroup(r_eq, r_lbl).arrange(DOWN, buff=0.18)
-        r_grp.to_edge(RIGHT, buff=1.6).align_to(m["bg"], DOWN)
+        # Morph the book into the reward — inherits the book's centre position,
+        # which also fixes the "too low" placement from before.
+        r_grp.move_to(m["book_group"].get_center())
 
-        self.play(FadeIn(r_grp, shift=LEFT * 0.3), run_time=0.9)
+        self.play(
+            FadeOut(m["book_group"], scale=0.8),
+            FadeIn(r_grp, scale=1.1),
+            run_time=1.0,
+        )
         # Colour only the three number tokens
         self.play(
             r_eq[1].animate.set_color(self.C_LOSS),
@@ -266,9 +286,7 @@ class GamesAsMathObjects(Scene):
 
         ref_y = divider.get_center()[1] - 0.55
         goal_lbl.set_y(ref_y)
-        # Align by bottom edge: Text and MathTex have different internal padding
-        # so centre-matching floats the expr up — bottom-aligning fixes the baseline.
-        goal_expr.align_to(goal_lbl, DOWN)
+        goal_expr.set_y(ref_y)
 
         goal_row = VGroup(goal_lbl, goal_expr)
 
