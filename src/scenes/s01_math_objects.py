@@ -106,25 +106,36 @@ class GamesAsMathObjects(Scene):
         m["brace"], m["s_label"], m["sub"] = brace, lbl, sub
 
     def _phase_action(self, m):
-        dest = self.gp(2, 4)
+        dest = self.gp(3, 1)
         new_stone = self._make_stone(self.WHITE_COL)
-        new_stone.move_to(dest + UP * 2.4)
+        new_stone.move_to(dest + DOWN * 3.2)
         self.add(new_stone)
 
+        # Horizontal arrow outside the board, pointing left toward the stone's row
+        board_right = m["bg"].get_right()[0]
         arrow = Arrow(
-            dest + UP * 2.0 + RIGHT * 0.45,
-            dest + UP * 0.28 + RIGHT * 0.45,
+            [board_right + 1.6, dest[1], 0],
+            [board_right + 0.08, dest[1], 0],
             color=self.C_ACTION, stroke_width=3.5,
             max_tip_length_to_length_ratio=0.18,
         )
         a_lbl = MathTex("a", color=self.C_ACTION, font_size=52)
-        a_lbl.next_to(arrow, RIGHT, buff=0.15)
+        a_lbl.next_to(arrow, UP, buff=0.12)
 
         new_sub = Text("move  =  action", font_size=24, color=GRAY_C)
         new_sub.move_to(m["sub"].get_center())
 
         self.play(FadeOut(m["sub"]), GrowArrow(arrow), Write(a_lbl), run_time=0.8)
         self.play(new_stone.animate.move_to(dest), run_time=0.75, rate_func=ease_out_quad)
+
+        # Pulse ring on the played stone
+        pulse = Circle(radius=self.STONE_R * 1.1, fill_opacity=0,
+                       stroke_color=self.C_ACTION, stroke_width=2.5)
+        pulse.move_to(dest)
+        self.add(pulse)
+        self.play(pulse.animate.scale(4).set_opacity(0), run_time=0.65, rate_func=ease_out_quad)
+        self.remove(pulse)
+
         m["stones"].add(new_stone)
         self.play(FadeIn(new_sub, shift=UP * 0.15), run_time=0.5)
         self.wait(0.7)
@@ -154,15 +165,31 @@ class GamesAsMathObjects(Scene):
         m["sub"] = new_sub
 
     def _phase_reward(self, m):
-        r_eq  = MathTex(r"r \;\in\; \{-1,\;0,\;+1\}", color=WHITE, font_size=42)
+        # Split so we can colour just the numbers, not the whole expression
+        r_eq = MathTex(
+            r"r \;\in\; \{", r"-1", r",\;", r"0", r",\;", r"+1", r"\}",
+            font_size=42,
+        )
+        r_eq.set_color(WHITE)
         r_lbl = Text("reward", font_size=24, color=GRAY_C)
         r_grp = VGroup(r_eq, r_lbl).arrange(DOWN, buff=0.18)
         r_grp.to_edge(RIGHT, buff=1.6).align_to(m["bg"], DOWN)
 
         self.play(FadeIn(r_grp, shift=LEFT * 0.3), run_time=0.9)
-        self.play(r_eq.animate.set_color(self.C_REWARD), run_time=0.38)
-        self.play(r_eq.animate.set_color(self.C_LOSS),   run_time=0.38)
-        self.play(r_eq.animate.set_color(WHITE),         run_time=0.3)
+        # Colour only the three number tokens
+        self.play(
+            r_eq[1].animate.set_color(self.C_LOSS),
+            r_eq[3].animate.set_color(GRAY_C),
+            r_eq[5].animate.set_color(self.C_REWARD),
+            run_time=0.45,
+        )
+        self.wait(0.35)
+        self.play(
+            r_eq[1].animate.set_color(WHITE),
+            r_eq[3].animate.set_color(WHITE),
+            r_eq[5].animate.set_color(WHITE),
+            run_time=0.35,
+        )
         self.wait(0.6)
         m["r_grp"] = r_grp
 
@@ -190,11 +217,18 @@ class GamesAsMathObjects(Scene):
             for _, expr, col in rows_data
         ])
 
+        # Arrange labels into a column, then position expressions to match
+        # each label's centre-y exactly — avoids the float caused by the two
+        # columns having different total heights when auto-centred together.
         label_col.arrange(DOWN, buff=0.6, aligned_edge=RIGHT)
-        expr_col.arrange(DOWN,  buff=0.6, aligned_edge=LEFT)
+        label_col.move_to(LEFT * 1.2 + UP * 0.4)
 
-        table = VGroup(label_col, expr_col).arrange(RIGHT, buff=0.55)
-        table.move_to(ORIGIN + UP * 0.4)
+        expr_left_x = label_col.get_right()[0] + 0.55
+        for i in range(len(rows_data)):
+            expr_col[i].align_to([expr_left_x, 0, 0], LEFT)
+            expr_col[i].set_y(label_col[i].get_center()[1])
+
+        self._expr_left_x = expr_left_x
 
         row_pairs = [(label_col[i], expr_col[i]) for i in range(len(rows_data))]
 
@@ -208,26 +242,33 @@ class GamesAsMathObjects(Scene):
         )
         self.wait(0.5)
 
-        self._table   = table
         self._lbl_col = label_col
         self._exp_col = expr_col
 
     def _phase_goal(self):
+        # Span the divider across both columns
+        left_x  = self._lbl_col.get_left()[0]
+        right_x = self._exp_col.get_right()[0]
+        bottom_y = min(self._lbl_col.get_bottom()[1], self._exp_col.get_bottom()[1])
+
         divider = Line(
-            self._table.get_left(), self._table.get_right(),
+            [left_x,  bottom_y, 0],
+            [right_x, bottom_y, 0],
             color=GRAY_D, stroke_width=1,
         )
-        divider.next_to(self._table, DOWN, buff=0.35)
+        divider.shift(DOWN * 0.35)
 
         goal_lbl  = Text("Goal:", font_size=36, color=self.C_ACTION)
         goal_expr = MathTex(r"\text{choose a good } a", font_size=46, color=self.C_ACTION)
 
-        goal_lbl.align_to(self._lbl_col,  RIGHT)
-        goal_expr.align_to(self._exp_col, LEFT)
+        goal_lbl.align_to(self._lbl_col, RIGHT)
+        goal_expr.align_to([self._expr_left_x, 0, 0], LEFT)
 
         ref_y = divider.get_center()[1] - 0.55
         goal_lbl.set_y(ref_y)
-        goal_expr.set_y(ref_y)
+        # Align by bottom edge: Text and MathTex have different internal padding
+        # so centre-matching floats the expr up — bottom-aligning fixes the baseline.
+        goal_expr.align_to(goal_lbl, DOWN)
 
         goal_row = VGroup(goal_lbl, goal_expr)
 
