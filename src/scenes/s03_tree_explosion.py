@@ -24,6 +24,7 @@ class TreeExplosionScene(Scene):
         self._phase_formula()
         self._phase_tree_growth()
         self._phase_fog()
+        self._phase_numbers()
         self._phase_depth_limit()
 
     # ─── layout helpers ───────────────────────────────────────────────────────
@@ -242,26 +243,87 @@ class TreeExplosionScene(Scene):
         self._ghost_dots  = ghost_dots
         self._ghost_lines = ghost_lines
 
+    def _phase_numbers(self):
+        # Show concrete node counts for Chess and Go — floating over the fog
+        # Row data: (game label, b value, d value, result tex, result color)
+        rows = [
+            (r"\text{Chess}", r"b \approx 35",  r"d \approx 40",  r"\approx 10^{62}",  WHITE),
+            (r"\text{Go}",    r"b \approx 250", r"d \approx 150", r"\approx 10^{359}", WHITE),
+        ]
+
+        col_game   = VGroup()
+        col_b      = VGroup()
+        col_d      = VGroup()
+        col_result = VGroup()
+
+        for game_tex, b_tex, d_tex, res_tex, res_col in rows:
+            col_game.add(  MathTex(game_tex,  font_size=30, color=GRAY_B))
+            col_b.add(     MathTex(b_tex,     font_size=30, color=self.C_EXP))
+            col_d.add(     MathTex(d_tex,     font_size=30, color=self.C_EXP))
+            col_result.add(MathTex(res_tex,   font_size=30, color=res_col))
+
+        col_game.arrange(DOWN,   buff=0.42, aligned_edge=RIGHT)
+        col_b.arrange(DOWN,      buff=0.42, aligned_edge=LEFT)
+        col_d.arrange(DOWN,      buff=0.42, aligned_edge=LEFT)
+        col_result.arrange(DOWN, buff=0.42, aligned_edge=LEFT)
+
+        sep   = MathTex(r"\Rightarrow", font_size=30, color=GRAY_D)
+        sep2  = sep.copy()
+        seps  = VGroup(sep, sep2).arrange(DOWN, buff=0.42)
+
+        table = VGroup(col_game, col_b, col_d, seps, col_result)
+        table.arrange(RIGHT, buff=0.38, aligned_edge=UP)
+
+        # Place in the fog — vertically centred in the dark region below the tree
+        y_fog_centre = self._y(3) - 0.6
+        table.move_to(np.array([0.0, y_fog_centre, 0.0]))
+
+        ref = MathTex(
+            r"\text{atoms in the observable universe} \approx 10^{80}",
+            font_size=20, color=GRAY_D,
+        )
+        ref.next_to(table, DOWN, buff=0.42)
+
+        # Animate rows one at a time
+        for i in range(len(rows)):
+            self.play(
+                LaggedStart(
+                    FadeIn(col_game[i],   shift=UP * 0.08),
+                    FadeIn(col_b[i],      shift=UP * 0.08),
+                    FadeIn(col_d[i],      shift=UP * 0.08),
+                    FadeIn(seps[i],       shift=UP * 0.08),
+                    FadeIn(col_result[i], shift=UP * 0.08),
+                    lag_ratio=0.18,
+                ),
+                run_time=1.0,
+            )
+            self.wait(0.5)
+
+        self.play(FadeIn(ref, shift=UP * 0.08), run_time=0.7)
+        self.wait(2.0)
+
+        self._numbers_grp = VGroup(table, ref)
+
     def _phase_depth_limit(self):
-        # Dashed red line cuts the tree between depth 2 and the fog
-        y_limit = self._y(2) - 0.52
+        # Centered dashed line cuts the tree between depth 2 and the fog
+        y_limit  = self._y(2) - 0.52
+        half_w   = 5.2   # symmetric around x = 0, stops just inside the depth tags
 
         line = DashedLine(
-            np.array([-6.2, y_limit, 0.0]),
-            np.array([ 4.5, y_limit, 0.0]),
+            np.array([-half_w, y_limit, 0.0]),
+            np.array([ half_w, y_limit, 0.0]),
             color=self.C_LIM, stroke_width=2.5,
             dash_length=0.18,
         )
 
         stop = Text("Search stops here.", font_size=26, color=self.C_LIM)
         game = Text("But the game does not.", font_size=26, color=GRAY_C)
-        labels = VGroup(stop, game).arrange(DOWN, buff=0.24)
-        labels.next_to(line, DOWN, buff=0.42)
+        VGroup(stop, game).arrange(DOWN, buff=0.24).next_to(line, UP, buff=0.32)
 
         self.play(Create(line), run_time=0.9)
         self.wait(0.15)
-        self.play(FadeIn(stop, shift=DOWN * 0.1), run_time=0.65)
-        self.play(FadeIn(game, shift=DOWN * 0.1), run_time=0.65)
+        self.play(FadeIn(stop, shift=UP * 0.1), run_time=0.65)
+        self.play(FadeIn(game, shift=UP * 0.1), run_time=0.65)
         self.wait(2.5)
 
         # Fade everything out — hands off to the evaluation scene
@@ -270,6 +332,7 @@ class TreeExplosionScene(Scene):
             *[e for level in self._edges  for e in level],
             *self._dtags,
             self._fog,
+            self._numbers_grp,
             line, stop, game,
         )
         self.play(FadeOut(all_mobs), run_time=1.3)
