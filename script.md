@@ -296,8 +296,6 @@ That line makes it more precise.
 
 ## Scene 6 — The Bitter Lesson
 
-This should be a dedicated but short scene, maybe 60–75 seconds.
-
 **Voiceover:**
 
 > This pattern shows up again and again in AI.
@@ -553,42 +551,6 @@ Then future influence lines appear across the board.
 > It is alien because it is optimized for a geometry of the game we do not naturally see.
 
 Keep this.
-
----
-
-## Scene 10 — Ending: the Bitter Lesson of games
-
-**Voiceover:**
-
-> Board games taught AI a bitter lesson.
->
-> For a while, it seemed natural to build machines that used human ideas: chess principles, Go patterns, expert rules.
->
-> But the systems that changed history leaned harder on general methods: search, learning, self-play, and computation.
->
-> That does not make human insight worthless.
-> It means human insight is often not the ceiling.
->
-> A machine can discover powerful strategies without inheriting our concepts, our style, or our sense of what looks natural.
->
-> And that is why playing against it feels so strange.
->
-> You are not just playing a stronger opponent.
-> You are playing against a different way of turning computation into judgment.
-
-**Final on-screen text:**
-
-```text
-Search + Learning + Compute
-```
-
-then transform into:
-
-```text
-A different way of seeing the future.
-```
-
----
 
 # The revised thesis
 

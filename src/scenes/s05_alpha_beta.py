@@ -1,5 +1,5 @@
 from manim import *
-from manim.utils.rate_functions import ease_out_quad, rush_from
+from manim.utils.rate_functions import ease_out_quad
 import numpy as np
 
 
@@ -12,7 +12,6 @@ class AlphaBetaScene(Scene):
     C_WIN   = "#50C878"   # green   — positive leaf values
     C_PRUNE = "#FF6B6B"   # red     — pruned nodes/edges
     C_ALPHA = "#A78BFA"   # purple  — alpha bound annotation
-    C_GHOST = "#2A2A2A"   # very dark — pruned subtree ghost
 
     NODE_R = 0.38
 
@@ -81,19 +80,22 @@ class AlphaBetaScene(Scene):
         lbl.move_to(self.POS[key] + DOWN * (self.NODE_R + 0.08 + lbl.height / 2))
         return lbl
 
-    def _travel(self, src_lbl, dest_key, run_time=0.55):
+    def _travel_and_arrive(self, src_lbl, dest_key, arrive_lbl, travel_rt=0.5, arrive_rt=0.35):
+        """Animate src_lbl copy flying to dest_key, then smoothly grow arrive_lbl."""
         copy = src_lbl.copy()
-        self.play(copy.animate.move_to(self.POS[dest_key]),
-                  run_time=run_time, rate_func=smooth)
+        self.add(copy)
+        self.play(
+            copy.animate.move_to(self.POS[dest_key]).set_opacity(0),
+            run_time=travel_rt, rate_func=smooth,
+        )
         self.remove(copy)
+        self.play(GrowFromCenter(arrive_lbl), run_time=arrive_rt)
 
     # ── phases ────────────────────────────────────────────────────────────────
 
     def _phase_intro(self):
-        l1 = Text("Minimax always gives the right answer.",
-                  font_size=38, color=WHITE)
-        l2 = Text("But it searches more than it needs to.",
-                  font_size=38, color=GRAY_C)
+        l1 = Tex("Minimax always gives the right answer.", font_size=38, color=WHITE)
+        l2 = Tex("But it searches more than it needs to.", font_size=38, color=GRAY_C)
         VGroup(l1, l2).arrange(DOWN, buff=0.5).move_to(ORIGIN)
 
         self.play(FadeIn(l1, shift=UP * 0.12), run_time=0.85)
@@ -120,7 +122,6 @@ class AlphaBetaScene(Scene):
         leaf_b1 = self._leaf("B1", r"+3", self.C_WIN)
         leaf_b2 = self._leaf("B2", r"+?", GRAY_C)
 
-        # Reveal tree top-down
         self.play(GrowFromCenter(root_node), run_time=0.6)
         self.play(
             LaggedStart(
@@ -158,27 +159,17 @@ class AlphaBetaScene(Scene):
 
     def _phase_left_branch(self):
         """Explore the A subtree fully: min(+8, +5) = +5."""
-        # Spotlight the A branch
         self.play(
             self._edge_ra.animate.set_color(self.C_MAX).set_stroke(width=3.0),
             run_time=0.4,
         )
 
-        # Highlight A1
-        self.play(
-            Indicate(self._leaf_a1, color=self.C_WIN, scale_factor=1.22),
-            run_time=0.65,
-        )
+        self.play(Indicate(self._leaf_a1, color=self.C_WIN, scale_factor=1.22), run_time=0.65)
         self.wait(0.2)
-
-        # Highlight A2
-        self.play(
-            Indicate(self._leaf_a2, color=self.C_WIN, scale_factor=1.22),
-            run_time=0.65,
-        )
+        self.play(Indicate(self._leaf_a2, color=self.C_WIN, scale_factor=1.22), run_time=0.65)
         self.wait(0.25)
 
-        # Opponent picks min: A2 is smaller, A1 is dimmed
+        # Opponent picks min — A2 wins, A1 dims
         self.play(
             self._leaf_a1.animate.set_opacity(0.28),
             self._edge_a1.animate.set_color(GRAY_E).set_stroke(width=1.0),
@@ -186,47 +177,42 @@ class AlphaBetaScene(Scene):
             run_time=0.5,
         )
 
-        # Backup +5 to node A
+        # +5 travels from A2 leaf up to node A, then grows in place
         val_a = self._val_below("A", r"+5", self.C_MIN)
-        self._travel(self._leaf_a2[1], "A")
-        self.add(val_a)
+        self._travel_and_arrive(self._leaf_a2[1], "A", val_a)
         self.wait(0.35)
 
         self._val_a = val_a
 
     def _phase_alpha_lock(self):
-        """
-        Root is MAX and just saw its first option is +5.
-        Establish α = 5 — root's guaranteed floor.
-        """
-        # Backup +5 to root
+        """Root is MAX and just saw its first option is +5. Establish α = 5."""
+        # +5 travels from node A up to root, then the floor label grows
         val_root_floor = self._val_below("root", r"\geq +5", self.C_MAX, fs=24)
-        self._travel(self._val_a, "root")
-        self.add(val_root_floor)
+        self._travel_and_arrive(self._val_a, "root", val_root_floor)
         self.wait(0.25)
 
-        # Alpha badge: a small pill next to the root node
+        # Alpha badge — placed to the LEFT of root so it never overlaps the tree below
         alpha_pill = RoundedRectangle(
             width=1.55, height=0.48, corner_radius=0.10,
             fill_color=self.C_ALPHA, fill_opacity=0.18,
             stroke_color=self.C_ALPHA, stroke_width=1.8,
         )
         alpha_lbl = MathTex(r"\alpha = 5", font_size=22, color=self.C_ALPHA)
-        alpha_pill.move_to(self.POS["root"] + LEFT * 1.62 + UP * 0.02)
+        alpha_pill.move_to(self.POS["root"] + LEFT * 1.72 + UP * 0.02)
         alpha_lbl.move_to(alpha_pill.get_center())
         alpha_grp = VGroup(alpha_pill, alpha_lbl)
 
         self.play(GrowFromCenter(alpha_grp), run_time=0.65)
 
-        # Annotation: root can guarantee at least 5
-        guarantee = Text("root can guarantee ≥ 5", font_size=20, color=self.C_ALPHA)
-        guarantee.next_to(alpha_pill, DOWN, buff=0.22)
-        self.play(FadeIn(guarantee, shift=UP * 0.08), run_time=0.5)
+        # Annotation placed ABOVE the badge so it never overlaps the tree
+        guarantee = Tex(r"root can guarantee $\geq 5$", font_size=20, color=self.C_ALPHA)
+        guarantee.next_to(alpha_pill, UP, buff=0.18)
+        self.play(FadeIn(guarantee, shift=DOWN * 0.08), run_time=0.5)
         self.wait(1.2)
         self.play(FadeOut(guarantee), run_time=0.4)
 
-        self._alpha_grp       = alpha_grp
-        self._val_root_floor  = val_root_floor
+        self._alpha_grp      = alpha_grp
+        self._val_root_floor = val_root_floor
 
     def _phase_right_start(self):
         """Begin exploring B: edge lights up, opponent evaluates B1 = +3."""
@@ -238,83 +224,73 @@ class AlphaBetaScene(Scene):
             self._edge_b1.animate.set_color(self.C_MIN).set_stroke(width=2.5),
             run_time=0.35,
         )
-        self.play(
-            Indicate(self._leaf_b1, color=self.C_WIN, scale_factor=1.22),
-            run_time=0.65,
-        )
+        self.play(Indicate(self._leaf_b1, color=self.C_WIN, scale_factor=1.22), run_time=0.65)
         self.wait(0.3)
 
-        # Key deduction: opponent already has +3, so B ≤ 3
-        # That means B ≤ 3 < α = 5 → root won't pick B regardless of B2
+        # Opponent already found +3; the whole B branch can be AT MOST +3
         val_b_ceil = self._val_below("B", r"\leq +3", self.C_PRUNE, fs=24)
-        self._travel(self._leaf_b1[1], "B")
-        self.add(val_b_ceil)
+        self._travel_and_arrive(self._leaf_b1[1], "B", val_b_ceil)
         self.wait(0.35)
 
         self._val_b_ceil = val_b_ceil
 
     def _phase_prune(self):
-        """The prune: B2 is irrelevant. Show the cut dramatically."""
-        # Comparison box appears near the root: α vs ceiling
+        """The prune: B2 is irrelevant. Comparison box, then the cut."""
+        # Comparison box — anchored to bottom of screen, away from tree
         compare_box = RoundedRectangle(
-            width=3.4, height=1.15, corner_radius=0.14,
+            width=3.6, height=1.2, corner_radius=0.14,
             fill_color="#111111", fill_opacity=1.0,
             stroke_color=GRAY_D, stroke_width=1.4,
         )
-        compare_box.to_edge(DOWN, buff=0.48)
+        compare_box.to_edge(DOWN, buff=0.42)
 
         row1 = VGroup(
-            Text("current best",        font_size=20, color=self.C_MAX),
-            MathTex("= 5",              font_size=24, color=self.C_MAX),
-        ).arrange(RIGHT, buff=0.25)
+            Tex("current best",   font_size=20, color=self.C_MAX),
+            MathTex("= 5",        font_size=24, color=self.C_MAX),
+        ).arrange(RIGHT, buff=0.22)
         row2 = VGroup(
-            Text("this branch  ≤",      font_size=20, color=self.C_PRUNE),
-            MathTex("3",                font_size=24, color=self.C_PRUNE),
-        ).arrange(RIGHT, buff=0.25)
-        rows = VGroup(row1, row2).arrange(DOWN, buff=0.22, aligned_edge=LEFT)
+            Tex(r"this branch $\leq$", font_size=20, color=self.C_PRUNE),
+            MathTex("3",               font_size=24, color=self.C_PRUNE),
+        ).arrange(RIGHT, buff=0.22)
+        rows = VGroup(row1, row2).arrange(DOWN, buff=0.24, aligned_edge=LEFT)
         rows.move_to(compare_box.get_center())
 
         self.play(FadeIn(compare_box), FadeIn(rows), run_time=0.6)
         self.wait(1.0)
 
-        # "therefore: prune" materialises
-        therefore = MathTex(
-            r"\therefore \;\text{prune}",
-            font_size=28, color=self.C_PRUNE,
-        )
+        therefore = MathTex(r"\therefore\;\text{prune}", font_size=28, color=self.C_PRUNE)
         therefore.next_to(compare_box, RIGHT, buff=0.45)
         self.play(Write(therefore), run_time=0.7)
         self.wait(0.7)
 
-        # Animate the cut: B2 and edge_b2 turn red, then a slash X appears
+        # Turn B2 and its edge red
         self.play(
             self._edge_b2.animate.set_color(self.C_PRUNE).set_stroke(width=3.5),
-            self._leaf_b2.animate.set_color(self.C_PRUNE).set_stroke(color=self.C_PRUNE),
+            self._leaf_b2[0].animate.set_stroke(color=self.C_PRUNE).set_fill(
+                color=self.C_PRUNE, opacity=0.18
+            ),
+            self._leaf_b2[1].animate.set_color(self.C_PRUNE),
             run_time=0.45,
         )
 
-        # Draw a bold X over B2
+        # Bold X over B2
         cx, cy = self.POS["B2"][0], self.POS["B2"][1]
         r = self.NODE_R * 1.05
         slash1 = Line(
-            np.array([cx - r, cy + r, 0.0]),
-            np.array([cx + r, cy - r, 0.0]),
+            np.array([cx - r, cy + r, 0.0]), np.array([cx + r, cy - r, 0.0]),
             color=self.C_PRUNE, stroke_width=4.5,
         )
         slash2 = Line(
-            np.array([cx - r, cy - r, 0.0]),
-            np.array([cx + r, cy + r, 0.0]),
+            np.array([cx - r, cy - r, 0.0]), np.array([cx + r, cy + r, 0.0]),
             color=self.C_PRUNE, stroke_width=4.5,
         )
         self.play(Create(slash1), Create(slash2), run_time=0.5)
 
-        # Pulse ring to emphasise the cut
         pulse = Circle(radius=self.NODE_R * 1.2, fill_opacity=0,
                        stroke_color=self.C_PRUNE, stroke_width=2.5)
         pulse.move_to(self.POS["B2"])
         self.add(pulse)
-        self.play(pulse.animate.scale(3.8).set_opacity(0),
-                  run_time=0.7, rate_func=ease_out_quad)
+        self.play(pulse.animate.scale(3.8).set_opacity(0), run_time=0.7, rate_func=ease_out_quad)
         self.remove(pulse)
         self.wait(0.5)
 
@@ -324,11 +300,7 @@ class AlphaBetaScene(Scene):
         self._slash2 = slash2
 
     def _phase_irrelevant(self):
-        """
-        Label the pruned node with the three-line mantra and
-        dim the entire B subtree to ghost level.
-        """
-        # Dim B branch to ghost — visually "it doesn't matter"
+        """Three-line mantra, centred over the B subtree, then ghost the whole branch."""
         ghost = VGroup(
             self._node_b, self._edge_rb,
             self._edge_b1, self._edge_b2,
@@ -338,54 +310,51 @@ class AlphaBetaScene(Scene):
         )
         self.play(ghost.animate.set_opacity(0.18), run_time=0.8)
 
-        # Three-line mantra appears to the right of the ghost B branch
-        l1 = Text("not wrong",       font_size=26, color=GRAY_B)
-        l2 = Text("not impossible",  font_size=26, color=GRAY_B)
-        l3 = Text("just irrelevant", font_size=26, color=self.C_PRUNE, weight="BOLD")
-        mantra = VGroup(l1, l2, l3).arrange(DOWN, buff=0.32)
-        mantra.move_to(RIGHT * 3.3 + DOWN * 0.3)
+        # B subtree spans x ≈ 1.6 – 4.3; centre ≈ 2.95
+        # Place mantra directly below the leaves (y ≈ -2.3), centred on subtree
+        l1 = Tex("not wrong",       font_size=26, color=GRAY_B)
+        l2 = Tex("not impossible",  font_size=26, color=GRAY_B)
+        l3 = Tex(r"\textbf{just irrelevant}", font_size=26, color=self.C_PRUNE)
+        mantra = VGroup(l1, l2, l3).arrange(DOWN, buff=0.30)
+        mantra.move_to(np.array([2.95, -2.30, 0.0]))
 
-        # Small connecting dashed line from pruned node to mantra
+        # Short dashed line from B2 down to the mantra
+        connector_start = self.POS["B2"] + DOWN * (self.NODE_R + 0.10)
+        connector_end   = mantra.get_top() + UP * 0.10
         dashed_connector = DashedLine(
-            self.POS["B2"] + RIGHT * (self.NODE_R + 0.12),
-            mantra.get_left() + LEFT * 0.15,
+            connector_start, connector_end,
             color=GRAY_E, stroke_width=1.0, dash_length=0.12,
         )
 
         self.play(
-            LaggedStart(
-                FadeIn(l1, shift=LEFT * 0.1),
-                FadeIn(l2, shift=LEFT * 0.1),
-                FadeIn(l3, shift=LEFT * 0.1),
-                lag_ratio=0.35,
-            ),
             Create(dashed_connector),
+            LaggedStart(
+                FadeIn(l1, shift=UP * 0.10),
+                FadeIn(l2, shift=UP * 0.10),
+                FadeIn(l3, shift=UP * 0.10),
+                lag_ratio=0.32,
+            ),
             run_time=1.2,
         )
-        self.wait(1.6)
+        self.wait(1.8)
         self.play(FadeOut(VGroup(mantra, dashed_connector)), run_time=0.55)
 
         self._ghost = ghost
 
     def _phase_same_answer(self):
-        """
-        Root picks max(5, ≤3) = 5.
-        Emphasise: same answer, less work.
-        """
-        # Restore left branch brightness, keep B ghosted
+        """Root picks max(5, ≤3) = 5. Same answer, less work."""
         self.play(
-            self._edge_ra.animate.set_stroke(opacity=1.0).set_color(self.C_MAX),
-            self._edge_ra.animate.set_stroke(width=4.5),
+            self._edge_ra.animate.set_color(self.C_MAX).set_stroke(width=4.5, opacity=1.0),
             run_time=0.4,
         )
 
         val_root_final = MathTex(r"+5", font_size=36, color=self.C_MAX)
         val_root_final.next_to(self._root_node, RIGHT, buff=0.28)
 
-        self._travel(self._val_a, "root")
-        self.play(GrowFromCenter(val_root_final), run_time=0.5)
+        # +5 travels from val_a (below A) up to root, then final label grows
+        self._travel_and_arrive(self._val_a, "root", val_root_final)
 
-        # Highlight the winning path: root → A → A2
+        # Optimal path: root → A → A2
         opt_path = VGroup(
             self._edge_ra.copy().set_stroke(color=WHITE, width=5.0),
             self._edge_a2.copy().set_stroke(color=WHITE, width=5.0),
@@ -395,18 +364,15 @@ class AlphaBetaScene(Scene):
                         stroke_color=WHITE, stroke_width=2.5)
         pulse2.move_to(self.POS["A2"])
         self.add(pulse2)
-        self.play(pulse2.animate.scale(2.6).set_opacity(0),
-                  run_time=0.6, rate_func=ease_out_quad)
+        self.play(pulse2.animate.scale(2.6).set_opacity(0), run_time=0.6, rate_func=ease_out_quad)
         self.remove(pulse2)
         self.wait(0.3)
 
-        # Banner: "same answer — less work"
-        banner = Text("Same answer.  Less work.", font_size=30, color=WHITE)
+        banner = Tex("Same answer. \\ Less work.", font_size=30, color=WHITE)
         banner.to_edge(DOWN, buff=0.55)
         self.play(FadeIn(banner, shift=UP * 0.1), run_time=0.6)
         self.wait(1.8)
 
-        # Fade everything out
         all_mobs = VGroup(
             self._root_node, self._node_a,
             self._edge_ra, self._edge_rb,
@@ -421,10 +387,7 @@ class AlphaBetaScene(Scene):
         self.wait(0.2)
 
     def _phase_equations(self):
-        """
-        Formal statement of alpha-beta: prune when ceiling ≤ α.
-        """
-        # α = best value MAX can guarantee along path from root
+        """Formal statement: prune when branch ceiling ≤ α."""
         eq_alpha = MathTex(
             r"\alpha", r"\;=\;",
             r"\text{best value } \textit{you} \text{ can already guarantee}",
@@ -433,7 +396,6 @@ class AlphaBetaScene(Scene):
         eq_alpha[0].set_color(self.C_ALPHA)
         eq_alpha.move_to(UP * 1.6)
 
-        # prune condition
         eq_prune = MathTex(
             r"\text{if } \hat{V}(B)",
             r"\;\leq\;",
@@ -447,7 +409,6 @@ class AlphaBetaScene(Scene):
         eq_prune[4].set_color(self.C_PRUNE)
         eq_prune.move_to(UP * 0.15)
 
-        # Why it is safe
         safe_note = Tex(
             r"$B$ cannot improve on what you already have.",
             font_size=26, color=GRAY_C,
@@ -464,14 +425,11 @@ class AlphaBetaScene(Scene):
         self.wait(0.2)
 
     def _phase_closing(self):
-        """
-        Two-line scientific phrasing from the script.
-        """
-        l1 = Text(
+        l1 = Tex(
             "Alpha-beta does not change the minimax answer.",
             font_size=30, color=GRAY_B,
         )
-        l2 = Text(
+        l2 = Tex(
             "It changes how much of the tree you need to inspect to find it.",
             font_size=30, color=WHITE,
         )
