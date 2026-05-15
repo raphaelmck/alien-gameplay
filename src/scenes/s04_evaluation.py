@@ -126,18 +126,7 @@ class EvaluationScene(Scene):
         self._fog   = fog
 
     def _phase_frontier(self):
-        # Pulse frontier nodes to signal they need scores
-        self.play(
-            *[d.animate.scale(1.5).set_fill(WHITE, opacity=1.0) for d in self._d2],
-            run_time=0.4,
-        )
-        self.play(
-            *[d.animate.scale(1 / 1.5).set_fill(self.C_NODE, opacity=1.0)
-              for d in self._d2],
-            run_time=0.35,
-        )
-
-        # Ghost branches peering into fog – faint future the search never reached
+        # Ghost branches peering into fog
         rng = np.random.default_rng(17)
         fog_branches = VGroup()
         for pos in self.D2_POS:
@@ -168,36 +157,37 @@ class EvaluationScene(Scene):
         not_ending = Tex(r"not endings --- game continues", font_size=28, color=GRAY_C)
         not_ending.move_to(np.array([0.0, self.LIMIT_Y - 0.62, 0.0]))
 
-        self.play(
-            *[b.animate.set_stroke(opacity=0.14) for b in fog_branches],
-            FadeIn(not_ending, shift=UP * 0.08),
-            run_time=0.8,
-        )
-        self.wait(1.5)
-        self.play(FadeOut(not_ending), run_time=0.4)
-
-        # Replace leaf dots with triangles (+ vertex dots) to suggest the game continues
+        # Build leaf triangle groups: top vertex aligned with edge endpoint (dot center),
+        # single disc only at the top tip.
         leaf_groups = []
-        transforms = []
+        transforms  = []
         for dot in self._d2:
             tri = Triangle(color=self.C_NODE, fill_opacity=0.12, stroke_width=1.5)
-            tri.scale(0.32).move_to(dot.get_center())
-            verts = tri.get_vertices()
-            mini_dots = VGroup(*[
-                Dot(v, radius=0.055, color=self.C_NODE).set_fill(self.C_NODE, opacity=0.75)
-                for v in verts
-            ])
-            grp = VGroup(tri, mini_dots)
+            tri.scale(0.32)
+            # shift so the top vertex lands exactly at the edge endpoint
+            tri.shift(dot.get_center() - tri.get_top())
+            tip_dot = Dot(dot.get_center(), radius=0.07, color=self.C_NODE)
+            tip_dot.set_fill(self.C_NODE, opacity=0.9)
+            grp = VGroup(tri, tip_dot)
             leaf_groups.append(grp)
             transforms.append(ReplacementTransform(dot, grp))
 
-        self.play(*transforms, run_time=0.55)
-        self._d2 = leaf_groups
+        # Branches reveal, text fades in, and circles smoothly morph to triangles together
+        self.play(
+            *[b.animate.set_stroke(opacity=0.14) for b in fog_branches],
+            FadeIn(not_ending, shift=UP * 0.08),
+            *transforms,
+            run_time=0.9,
+            rate_func=smooth,
+        )
+        self.wait(1.5)
+        self.play(FadeOut(not_ending), run_time=0.4)
+        self.play(FadeOut(self._limit), run_time=0.5)
 
+        self._d2          = leaf_groups
         self._fog_branches = fog_branches
 
     def _phase_evaluator(self):
-        # Evaluator lens glows in the fog zone below the depth limit
         eval_box = RoundedRectangle(
             width=2.0, height=1.1, corner_radius=0.20,
             fill_color=self.C_BOX, fill_opacity=0.14,
@@ -210,7 +200,10 @@ class EvaluationScene(Scene):
         score_txt = Text("Score the frontier.", font_size=24, color=GRAY_B)
         score_txt.to_edge(DOWN, buff=0.48)
 
-        self.play(GrowFromCenter(eval_box), Write(eval_lbl), run_time=0.7)
+        # Box appears first, label writes in after
+        self.play(GrowFromCenter(eval_box), run_time=0.5)
+        self.wait(0.1)
+        self.play(Write(eval_lbl), run_time=0.5)
         self.play(FadeIn(score_txt, shift=UP * 0.1), run_time=0.5)
         self.wait(0.25)
 
@@ -228,13 +221,14 @@ class EvaluationScene(Scene):
 
         self.wait(1.0)
         self.play(FadeOut(score_txt), run_time=0.4)
+        # Lock fill state explicitly so subsequent animations don't trigger a blink
+        eval_box.set_fill(self.C_BOX, opacity=0.14)
 
         self._eval_box   = eval_box
         self._eval_lbl   = eval_lbl
         self._score_lbls = score_lbls
 
     def _phase_backup(self):
-        # Role labels on internal nodes
         min_tags = [
             Text("MIN", font_size=13, color=GRAY_D).next_to(d, RIGHT, buff=0.12)
             for d in self._d1
@@ -250,7 +244,7 @@ class EvaluationScene(Scene):
         )
         self.wait(0.25)
 
-        # D2 → D1: ghost copies flow upward, backed-up value appears
+        # D2 → D1: ghost copies flow upward, result grows as they arrive
         d1_score_lbls = []
         for i, (d1_dot, d1_val) in enumerate(zip(self._d1, self.D1_SCORES)):
             gl = self._score_lbls[i * 2].copy()
@@ -264,7 +258,8 @@ class EvaluationScene(Scene):
                 gl.animate.move_to(d1_dot.get_center()).set_opacity(0),
                 gr.animate.move_to(d1_dot.get_center()).set_opacity(0),
                 GrowFromCenter(stex),
-                run_time=0.75,
+                run_time=1.0,
+                rate_func=smooth,
             )
             self.remove(gl, gr)
             d1_score_lbls.append(stex)
@@ -273,7 +268,7 @@ class EvaluationScene(Scene):
 
         # D1 → root backup
         root_stex = self._score_label(self.ROOT_SCORE, font_size=30)
-        root_stex.next_to(self._root, RIGHT, buff=0.22)
+        root_stex.next_to(max_tag, RIGHT, buff=0.18)
 
         gl2 = d1_score_lbls[0].copy()
         gr2 = d1_score_lbls[1].copy()
@@ -282,12 +277,12 @@ class EvaluationScene(Scene):
             gl2.animate.move_to(self._root.get_center()).set_opacity(0),
             gr2.animate.move_to(self._root.get_center()).set_opacity(0),
             GrowFromCenter(root_stex),
-            run_time=0.85,
+            run_time=1.1,
+            rate_func=smooth,
         )
         self.remove(gl2, gr2)
         self.wait(0.35)
 
-        # Formula lands after the viewer sees the need for approximation
         approx = MathTex(
             r"\hat{V}_\theta(s) \;\approx\; V(s)", font_size=40, color=GRAY_B
         )
@@ -295,11 +290,11 @@ class EvaluationScene(Scene):
         self.play(Write(approx), run_time=0.85)
         self.wait(2.0)
 
-        compress = Text(
-            "A huge future,\ncompressed into one number.",
-            font_size=21, color=GRAY_C, line_spacing=1.35,
+        compress = Tex(
+            r"A huge future, compressed into one number.",
+            font_size=22, color=GRAY_C,
         )
-        compress.to_edge(DOWN, buff=0.42)
+        compress.move_to(DOWN * 3.4)
         self.play(
             FadeOut(approx, shift=UP * 0.06),
             FadeIn(compress, shift=UP * 0.06),
@@ -307,10 +302,11 @@ class EvaluationScene(Scene):
         )
         self.wait(1.8)
 
+        # limit is already gone (faded in _phase_frontier); eval_box/lbl stay for morph
         all_tree = VGroup(
             self._root, *self._d1, *self._d2,
             *self._e01, *self._e12,
-            self._limit, self._fog, self._fog_branches,
+            self._fog, self._fog_branches,
             *self._score_lbls, *d1_score_lbls, root_stex,
             *min_tags, max_tag, compress,
         )
@@ -321,7 +317,6 @@ class EvaluationScene(Scene):
         eval_box = self._eval_box
         eval_lbl = self._eval_lbl
 
-        # Evaluator scales up to center stage
         big_box = RoundedRectangle(
             width=3.8, height=2.8, corner_radius=0.28,
             fill_color=self.C_BOX, fill_opacity=0.14,
@@ -332,42 +327,70 @@ class EvaluationScene(Scene):
         big_lbl.next_to(big_box, UP, buff=0.22)
 
         self.play(
-            Transform(eval_box, big_box),
-            Transform(eval_lbl, big_lbl),
+            ReplacementTransform(eval_box, big_box),
+            ReplacementTransform(eval_lbl, big_lbl),
             run_time=0.85,
         )
         self.wait(0.2)
 
-        # ── hand-coded interior ───────────────────────────────────────────────
-        feat_items = ["material count", "king safety", "pawn structure", "mobility"]
-        checks = VGroup(*[Text("✓", font_size=18, color=self.C_TRUE)
-                          for _ in feat_items])
-        feats  = VGroup(*[Text(t,   font_size=18, color=GRAY_B)
-                          for t in feat_items])
-        checks.arrange(DOWN, buff=0.28)
-        feats.arrange(DOWN, buff=0.28, aligned_edge=LEFT)
-        content = VGroup(checks, feats).arrange(RIGHT, buff=0.14)
-        content.move_to(big_box.get_center() + DOWN * 0.12)
+        # ── interior layout helper ────────────────────────────────────────────
+        def _make_interior(title_str, title_color, items):
+            checks = VGroup(*[
+                MathTex(r"\checkmark", font_size=20, color=self.C_TRUE)
+                for _ in items
+            ])
+            feats = VGroup(*[
+                Tex(t, font_size=20, color=GRAY_B)
+                for t in items
+            ])
+            checks.arrange(DOWN, buff=0.28)
+            feats.arrange(DOWN, buff=0.28, aligned_edge=LEFT)
+            content = VGroup(checks, feats).arrange(RIGHT, buff=0.14)
+            content.move_to(big_box.get_center() + DOWN * 0.12)
+            title = Tex(rf"\textbf{{{title_str}}}", font_size=22, color=title_color)
+            title.move_to(big_box.get_center() + UP * 1.05)
+            return VGroup(title, content), content[0], content[1]
 
-        hand_title = Text("hand-coded", font_size=19, color=self.C_TRUE,
-                          weight="BOLD")
-        hand_title.move_to(big_box.get_center() + UP * 1.05)
-
-        hand_interior = VGroup(hand_title, content)
+        # ── Chess hand-coded ──────────────────────────────────────────────────
+        chess_items = ["material count", "king safety", "pawn structure", "mobility"]
+        chess_grp, chess_checks, chess_feats = _make_interior(
+            "hand-coded (Chess)", self.C_TRUE, chess_items
+        )
+        chess_title = chess_grp[0]
 
         self.play(
-            FadeIn(hand_title, shift=DOWN * 0.08),
+            FadeIn(chess_title, shift=DOWN * 0.08),
             LaggedStart(
-                *[FadeIn(VGroup(checks[i], feats[i]), shift=RIGHT * 0.08)
-                  for i in range(len(feat_items))],
+                *[FadeIn(VGroup(chess_checks[i], chess_feats[i]), shift=RIGHT * 0.08)
+                  for i in range(len(chess_items))],
                 lag_ratio=0.18,
             ),
             run_time=1.1,
         )
-        self.wait(1.6)
+        self.wait(1.4)
 
-        # ── neural-network interior ───────────────────────────────────────────
-        nc     = big_box.get_center()
+        # ── Go hand-coded ─────────────────────────────────────────────────────
+        go_items = ["territory counting", "life and death", "influence", "ko fights"]
+        go_grp, go_checks, go_feats = _make_interior(
+            "hand-coded (Go)", self.C_TRUE, go_items
+        )
+        go_title = go_grp[0]
+
+        self.play(FadeOut(chess_grp, shift=LEFT * 0.12), run_time=0.45)
+        self.play(
+            FadeIn(go_title, shift=DOWN * 0.08),
+            LaggedStart(
+                *[FadeIn(VGroup(go_checks[i], go_feats[i]), shift=RIGHT * 0.08)
+                  for i in range(len(go_items))],
+                lag_ratio=0.18,
+            ),
+            run_time=1.1,
+        )
+        self.wait(1.4)
+
+        # ── Neural-network interior ───────────────────────────────────────────
+        # Center the graph slightly below the box center
+        nc     = big_box.get_center() + DOWN * 0.15
         inp_ys = [+0.52,  0.0, -0.52]
         hid_ys = [+0.26, -0.26]
 
@@ -376,10 +399,8 @@ class EvaluationScene(Scene):
             d.set_fill(col, opacity=0.85)
             return d
 
-        inp_dots = VGroup(*[_nd(nc[0] - 0.88, nc[1] + y, self.C_EST)
-                            for y in inp_ys])
-        hid_dots = VGroup(*[_nd(nc[0],          nc[1] + y, self.C_EST)
-                            for y in hid_ys])
+        inp_dots = VGroup(*[_nd(nc[0] - 0.88, nc[1] + y, self.C_EST) for y in inp_ys])
+        hid_dots = VGroup(*[_nd(nc[0],          nc[1] + y, self.C_EST) for y in hid_ys])
         out_dot  = _nd(nc[0] + 0.88, nc[1], self.C_EST)
 
         nn_edges = VGroup()
@@ -397,13 +418,12 @@ class EvaluationScene(Scene):
                 color=self.C_EST, stroke_width=0.9, stroke_opacity=0.38,
             ))
 
-        nn_title = Text("neural network", font_size=19, color=self.C_EST,
-                        weight="BOLD")
+        nn_title = Tex(r"\textbf{neural network}", font_size=22, color=self.C_EST)
         nn_title.move_to(big_box.get_center() + UP * 1.05)
 
         nn_interior = VGroup(nn_title, nn_edges, inp_dots, hid_dots, out_dot)
 
-        self.play(FadeOut(hand_interior), run_time=0.55)
+        self.play(FadeOut(go_grp, shift=LEFT * 0.12), run_time=0.45)
         self.play(
             FadeIn(nn_title, shift=DOWN * 0.08),
             Create(nn_edges),
@@ -415,14 +435,14 @@ class EvaluationScene(Scene):
         )
         self.wait(1.2)
 
-        caption = Text("The machinery changed.  The role did not.",
-                       font_size=22, color=GRAY_C)
+        caption = Tex(r"The machinery changed. The role did not.",
+                      font_size=22, color=GRAY_C)
         caption.to_edge(DOWN, buff=0.55)
         self.play(FadeIn(caption, shift=UP * 0.1), run_time=0.65)
         self.wait(2.5)
 
         self.play(
-            FadeOut(VGroup(eval_box, eval_lbl, nn_interior, caption)),
+            FadeOut(VGroup(big_box, big_lbl, nn_interior, caption)),
             run_time=1.0,
         )
         self.wait(0.4)
