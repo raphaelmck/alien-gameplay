@@ -302,19 +302,8 @@ class EvaluationScene(Scene):
         )
         self.wait(1.8)
 
-        # Fade eval_box with the fog so they disappear together — no background-change blink.
-        # A fresh box is added instantly after (same frame) for _phase_morph to transform.
-        all_tree = VGroup(
-            self._root, *self._d1, *self._d2,
-            *self._e01, *self._e12,
-            self._fog, self._fog_branches,
-            *self._score_lbls, *d1_score_lbls, root_stex,
-            *min_tags, max_tag, compress,
-            self._eval_box, self._eval_lbl,
-        )
-        self.play(FadeOut(all_tree), run_time=1.0)
-
-        # Re-add a clean eval box at the same position before any new frame is rendered
+        # Place a fresh box on top of eval_box BEFORE the fadeout so it's never absent.
+        # The stale eval_box fades out underneath the fresh one — viewer sees no change.
         fresh_box = RoundedRectangle(
             width=2.0, height=1.1, corner_radius=0.20,
             fill_color=self.C_BOX, fill_opacity=0.14,
@@ -324,9 +313,18 @@ class EvaluationScene(Scene):
         fresh_lbl = MathTex(r"\hat{V}_\theta", font_size=38, color=self.C_BOX)
         fresh_lbl.move_to(fresh_box.get_center())
         self.add(fresh_box, fresh_lbl)
+
+        all_tree = VGroup(
+            self._root, *self._d1, *self._d2,
+            *self._e01, *self._e12,
+            self._fog, self._fog_branches,
+            *self._score_lbls, *d1_score_lbls, root_stex,
+            *min_tags, max_tag, compress,
+            self._eval_box, self._eval_lbl,
+        )
+        self.play(FadeOut(all_tree), run_time=1.0)
         self._eval_box = fresh_box
         self._eval_lbl = fresh_lbl
-
         self.wait(0.2)
 
     def _phase_morph(self):
