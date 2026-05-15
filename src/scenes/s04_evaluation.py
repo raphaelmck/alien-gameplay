@@ -1,332 +1,428 @@
 from manim import *
-from manim.utils.rate_functions import ease_out_quad
 import numpy as np
 
 
 class EvaluationScene(Scene):
-    """Scene 4 – Evaluation functions: approximating the value function."""
+    """Scene 4 – Evaluation: scoring the frontier, backing up values."""
 
-    BG      = "#000000"
-    C_TRUE  = "#5B9BD5"   # blue  — true value V(s)
-    C_EST   = "#F0A500"   # orange — estimated value V̂(s)
-    C_BOX   = "#A78BFA"   # purple — evaluator box
-    C_POS   = "#50C878"   # green — positive score
-    C_HAND  = "#5B9BD5"   # blue  — hand-coded card
-    C_NN    = "#F0A500"   # orange — neural-network card
+    BG     = "#000000"
+    C_NODE = "#A78BFA"
+    C_EDGE = "#3A3A3A"
+    C_LIM  = "#FF6B6B"
+    C_EST  = "#F0A500"
+    C_TRUE = "#5B9BD5"
+    C_BOX  = "#A78BFA"
+    C_POS  = "#50C878"
+    C_NEG  = "#FF6B6B"
 
-    N       = 5
-    SIDE    = 2.2
-    STONE_R = 0.18
+    NODE_R = 0.22
+
+    ROOT_POS = np.array([ 0.0,  2.6, 0.0])
+    D1_POS   = [np.array([-2.5,  1.1, 0.0]),
+                np.array([ 2.5,  1.1, 0.0])]
+    D2_POS   = [np.array([-3.8, -0.4, 0.0]),
+                np.array([-1.3, -0.4, 0.0]),
+                np.array([ 1.3, -0.4, 0.0]),
+                np.array([ 3.8, -0.4, 0.0])]
+
+    LIMIT_Y = -1.1
+
+    # D1 nodes are MIN; root is MAX
+    # min(+0.4, -0.2) = -0.2   min(+0.7, +0.3) = +0.3   max(-0.2, +0.3) = +0.3
+    D2_SCORES  = [+0.4, -0.2, +0.7, +0.3]
+    D1_SCORES  = [-0.2, +0.3]
+    ROOT_SCORE = +0.3
 
     def construct(self):
         self.camera.background_color = self.BG
-        self.SP = self.SIDE / (self.N - 1)
-        self._phase_bridge()
-        self._phase_notation()
-        self._phase_blackbox()
-        self._phase_two_approaches()
-        self._phase_collapse()
+        self._phase_horizon()
+        self._phase_frontier()
+        self._phase_evaluator()
+        self._phase_backup()
+        self._phase_morph()
 
-    # ─── board helpers ────────────────────────────────────────────────────────
+    # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _gp(self, bc, i, j):
-        x = bc[0] - self.SIDE / 2 + i * self.SP
-        y = bc[1] - self.SIDE / 2 + j * self.SP
-        return np.array([x, y, 0.0])
+    def _node(self, pos, color=None, r=None, opacity=1.0):
+        color = color or self.C_NODE
+        r     = r     or self.NODE_R
+        d = Dot(pos, radius=r, color=color)
+        d.set_fill(color, opacity=opacity)
+        d.set_stroke(width=0)
+        return d
 
-    def _make_board(self, bc):
-        bg = Square(side_length=self.SIDE + 0.3)
-        bg.set_fill("#C8A96E", opacity=1).set_stroke(width=0)
-        bg.move_to(bc)
-        lines = VGroup()
-        s2, sp = self.SIDE / 2, self.SP
-        for k in range(self.N):
-            t = -s2 + k * sp
-            lines.add(Line([bc[0] + t, bc[1] - s2, 0], [bc[0] + t, bc[1] + s2, 0],
-                           color="#2A2A2A", stroke_width=1.2))
-            lines.add(Line([bc[0] - s2, bc[1] + t, 0], [bc[0] + s2, bc[1] + t, 0],
-                           color="#2A2A2A", stroke_width=1.2))
-        return bg, lines
+    def _edge(self, p1, p2, opacity=1.0, width=1.4):
+        l = Line(p1, p2, color=self.C_EDGE, stroke_width=width)
+        l.set_stroke(opacity=opacity)
+        return l
 
-    def _make_stone(self, col):
-        c = Circle(radius=self.STONE_R)
-        c.set_fill(col, opacity=1)
-        c.set_stroke(color="#C0C0C0" if col == "#F5F5F5" else "#3A3A3A", width=1.0)
-        return c
+    def _score_label(self, val, font_size=26):
+        col = self.C_POS if val >= 0 else self.C_NEG
+        return MathTex(f"{val:+.1f}", font_size=font_size, color=col)
 
-    # ─── phases ──────────────────────────────────────────────────────────────
+    # ── phases ────────────────────────────────────────────────────────────────
 
-    def _phase_bridge(self):
-        l1 = Text("The search must stop.", font_size=40, color=WHITE)
-        l2 = Text("But we still need to judge the position.", font_size=28, color=GRAY_C)
-        g  = VGroup(l1, l2).arrange(DOWN, buff=0.52).move_to(ORIGIN)
+    def _phase_horizon(self):
+        root = self._node(self.ROOT_POS)
+        d1   = [self._node(p) for p in self.D1_POS]
+        d2   = [self._node(p) for p in self.D2_POS]
 
-        self.play(FadeIn(l1, shift=UP * 0.14), run_time=0.9)
-        self.wait(0.4)
-        self.play(FadeIn(l2, shift=UP * 0.12), run_time=0.8)
-        self.wait(1.8)
-        self.play(FadeOut(g), run_time=0.7)
-        self.wait(0.15)
+        e01 = [self._edge(self.ROOT_POS, p) for p in self.D1_POS]
+        e12 = [
+            self._edge(self.D1_POS[0], self.D2_POS[0]),
+            self._edge(self.D1_POS[0], self.D2_POS[1]),
+            self._edge(self.D1_POS[1], self.D2_POS[2]),
+            self._edge(self.D1_POS[1], self.D2_POS[3]),
+        ]
 
-    def _phase_notation(self):
-        true_lbl = Text("true value", font_size=22, color=GRAY_C)
-        true_eq  = MathTex(r"V(s)", font_size=64, color=self.C_TRUE)
-        true_grp = VGroup(true_lbl, true_eq).arrange(DOWN, buff=0.22)
-        true_grp.move_to(LEFT * 3.0)
-
-        arr = Arrow(LEFT * 1.2, RIGHT * 1.2, color=GRAY_D,
-                    stroke_width=3, max_tip_length_to_length_ratio=0.2)
-        arr.move_to(ORIGIN)
-        arr_lbl = Text("impossible to compute exactly", font_size=16, color=GRAY_D)
-        arr_lbl.next_to(arr, UP, buff=0.12)
-
-        est_lbl = Text("estimated value", font_size=22, color=GRAY_C)
-        est_eq  = MathTex(r"\hat{V}_\theta(s)", font_size=64, color=self.C_EST)
-        est_grp = VGroup(est_lbl, est_eq).arrange(DOWN, buff=0.22)
-        est_grp.move_to(RIGHT * 3.0)
-
-        approx = MathTex(
-            r"\hat{V}_\theta(s) \;\approx\; V(s)",
-            font_size=42, color=GRAY_B,
+        self.play(GrowFromCenter(root), run_time=0.4)
+        self.play(
+            LaggedStart(*[Create(e) for e in e01], lag_ratio=0.15),
+            LaggedStart(*[GrowFromCenter(n) for n in d1], lag_ratio=0.15),
+            run_time=0.65,
         )
-        approx.move_to(DOWN * 1.9)
-
-        self.play(FadeIn(true_grp, shift=RIGHT * 0.15), run_time=0.9)
-        self.wait(0.35)
-        self.play(GrowArrow(arr), FadeIn(arr_lbl, shift=DOWN * 0.08), run_time=0.7)
-        self.play(FadeIn(est_grp, shift=LEFT * 0.15), run_time=0.9)
-        self.wait(0.4)
-        self.play(Write(approx), run_time=0.9)
-        self.wait(1.8)
-        self.play(FadeOut(VGroup(true_grp, arr, arr_lbl, est_grp, approx)), run_time=0.8)
+        self.play(
+            LaggedStart(*[Create(e) for e in e12], lag_ratio=0.08),
+            LaggedStart(*[GrowFromCenter(n) for n in d2], lag_ratio=0.08),
+            run_time=0.85,
+        )
         self.wait(0.2)
 
-    def _phase_blackbox(self):
-        # board → V̂θ → single number, then slide up to make room
-        bc = np.array([-3.6, 0.0, 0.0])
+        limit = DashedLine(
+            np.array([-5.6, self.LIMIT_Y, 0.0]),
+            np.array([ 5.6, self.LIMIT_Y, 0.0]),
+            color=self.C_LIM, stroke_width=2.5, dash_length=0.18,
+        )
+        self.play(Create(limit), run_time=0.8)
 
-        bg, lines = self._make_board(bc)
-        stone_data = [
-            (1, 3, "#1A1A1A"), (2, 3, "#F5F5F5"),
-            (2, 2, "#1A1A1A"), (3, 2, "#F5F5F5"),
-            (1, 1, "#F5F5F5"), (3, 3, "#1A1A1A"),
-        ]
-        stones = VGroup()
-        for i, j, col in stone_data:
-            s = self._make_stone(col)
-            s.move_to(self._gp(bc, i, j))
-            stones.add(s)
-        board_grp = VGroup(bg, lines, stones)
+        t1 = Text("Search stops here.", font_size=26, color=self.C_LIM)
+        t2 = Text("The game does not.", font_size=26, color=GRAY_C)
+        txt = VGroup(t1, t2).arrange(DOWN, buff=0.24)
+        txt.move_to(np.array([0.0, self.LIMIT_Y - 1.0, 0.0]))
 
-        s_lbl = MathTex(r"s", font_size=34, color=self.C_TRUE)
-        s_lbl.next_to(board_grp, DOWN, buff=0.26)
+        self.play(FadeIn(t1, shift=UP * 0.1), run_time=0.55)
+        self.play(FadeIn(t2, shift=UP * 0.1), run_time=0.55)
+        self.wait(1.8)
 
-        arr_in = Arrow(
-            np.array([bc[0] + self.SIDE / 2 + 0.30, 0.0, 0.0]),
-            np.array([bc[0] + self.SIDE / 2 + 1.25, 0.0, 0.0]),
-            color=GRAY_C, stroke_width=3, max_tip_length_to_length_ratio=0.22,
+        fog = Rectangle(
+            width=config.frame_width + 1.0, height=9.0,
+            fill_color=BLACK, fill_opacity=0.0, stroke_width=0,
+        )
+        fog.move_to(np.array([0.0, self.LIMIT_Y - 0.08 - 4.5, 0.0]))
+        self.add(fog)
+        self.play(
+            fog.animate.set_fill(opacity=0.92),
+            FadeOut(txt),
+            run_time=0.8,
+        )
+        self.wait(0.1)
+
+        self._root  = root
+        self._d1    = d1
+        self._d2    = d2
+        self._e01   = e01
+        self._e12   = e12
+        self._limit = limit
+        self._fog   = fog
+
+    def _phase_frontier(self):
+        # Pulse frontier nodes to signal they need scores
+        self.play(
+            *[d.animate.scale(1.5).set_fill(WHITE, opacity=1.0) for d in self._d2],
+            run_time=0.4,
+        )
+        self.play(
+            *[d.animate.scale(1 / 1.5).set_fill(self.C_NODE, opacity=1.0)
+              for d in self._d2],
+            run_time=0.35,
         )
 
-        box = RoundedRectangle(
-            width=2.1, height=1.35, corner_radius=0.22,
+        # Ghost branches peering into fog – faint future the search never reached
+        rng = np.random.default_rng(17)
+        fog_branches = VGroup()
+        for pos in self.D2_POS:
+            px, py = pos[0], pos[1]
+            branch_roots = []
+            for _ in range(5):
+                ang = rng.uniform(-0.55, 0.55)
+                ln  = rng.uniform(0.40, 0.80)
+                x2  = px + np.sin(ang) * ln
+                y2  = py - np.cos(ang) * ln * 0.85
+                fog_branches.add(
+                    Line(pos, np.array([x2, y2, 0.0]),
+                         color=GRAY_E, stroke_width=0.7, stroke_opacity=0.0)
+                )
+                branch_roots.append((x2, y2, ang))
+            for (x2, y2, ang) in branch_roots:
+                for _ in range(2):
+                    ang2 = ang + rng.uniform(-0.40, 0.40)
+                    ln2  = rng.uniform(0.25, 0.55)
+                    x3   = x2 + np.sin(ang2) * ln2
+                    y3   = y2 - np.cos(ang2) * ln2 * 0.85
+                    fog_branches.add(
+                        Line(np.array([x2, y2, 0.0]), np.array([x3, y3, 0.0]),
+                             color=GRAY_E, stroke_width=0.45, stroke_opacity=0.0)
+                    )
+        self.add(fog_branches)
+
+        not_ending = Tex(r"not endings --- game continues", font_size=28, color=GRAY_C)
+        not_ending.move_to(np.array([0.0, self.LIMIT_Y - 0.62, 0.0]))
+
+        self.play(
+            *[b.animate.set_stroke(opacity=0.14) for b in fog_branches],
+            FadeIn(not_ending, shift=UP * 0.08),
+            run_time=0.8,
+        )
+        self.wait(1.5)
+        self.play(FadeOut(not_ending), run_time=0.4)
+
+        # Replace leaf dots with triangles (+ vertex dots) to suggest the game continues
+        leaf_groups = []
+        transforms = []
+        for dot in self._d2:
+            tri = Triangle(color=self.C_NODE, fill_opacity=0.12, stroke_width=1.5)
+            tri.scale(0.32).move_to(dot.get_center())
+            verts = tri.get_vertices()
+            mini_dots = VGroup(*[
+                Dot(v, radius=0.055, color=self.C_NODE).set_fill(self.C_NODE, opacity=0.75)
+                for v in verts
+            ])
+            grp = VGroup(tri, mini_dots)
+            leaf_groups.append(grp)
+            transforms.append(ReplacementTransform(dot, grp))
+
+        self.play(*transforms, run_time=0.55)
+        self._d2 = leaf_groups
+
+        self._fog_branches = fog_branches
+
+    def _phase_evaluator(self):
+        # Evaluator lens glows in the fog zone below the depth limit
+        eval_box = RoundedRectangle(
+            width=2.0, height=1.1, corner_radius=0.20,
             fill_color=self.C_BOX, fill_opacity=0.14,
             stroke_color=self.C_BOX, stroke_width=2.5,
         )
-        box.next_to(arr_in, RIGHT, buff=0.0)
-        box_lbl = MathTex(r"\hat{V}_\theta", font_size=36, color=self.C_BOX)
-        box_lbl.move_to(box.get_center())
+        eval_box.move_to(np.array([0.0, -2.1, 0.0]))
+        eval_lbl = MathTex(r"\hat{V}_\theta", font_size=38, color=self.C_BOX)
+        eval_lbl.move_to(eval_box.get_center())
 
-        arr_out = Arrow(
-            box.get_right() + RIGHT * 0.05,
-            box.get_right() + RIGHT * 1.2,
-            color=GRAY_C, stroke_width=3, max_tip_length_to_length_ratio=0.22,
+        score_txt = Text("Score the frontier.", font_size=24, color=GRAY_B)
+        score_txt.to_edge(DOWN, buff=0.48)
+
+        self.play(GrowFromCenter(eval_box), Write(eval_lbl), run_time=0.7)
+        self.play(FadeIn(score_txt, shift=UP * 0.1), run_time=0.5)
+        self.wait(0.25)
+
+        score_lbls = []
+        for dot, val in zip(self._d2, self.D2_SCORES):
+            stex = self._score_label(val, font_size=24)
+            stex.next_to(dot, DOWN, buff=0.16)
+            self.play(eval_box.animate.set_fill(opacity=0.42), run_time=0.22)
+            self.play(
+                GrowFromCenter(stex),
+                eval_box.animate.set_fill(opacity=0.14),
+                run_time=0.38,
+            )
+            score_lbls.append(stex)
+
+        self.wait(1.0)
+        self.play(FadeOut(score_txt), run_time=0.4)
+
+        self._eval_box   = eval_box
+        self._eval_lbl   = eval_lbl
+        self._score_lbls = score_lbls
+
+    def _phase_backup(self):
+        # Role labels on internal nodes
+        min_tags = [
+            Text("MIN", font_size=13, color=GRAY_D).next_to(d, RIGHT, buff=0.12)
+            for d in self._d1
+        ]
+        max_tag = Text("MAX", font_size=13, color=GRAY_D).next_to(
+            self._root, RIGHT, buff=0.12
         )
 
-        score = MathTex(r"+0.73", font_size=54, color=self.C_POS)
-        score.next_to(arr_out, RIGHT, buff=0.16)
-        score_sub = Text("position value", font_size=17, color=GRAY_C)
-        score_sub.next_to(score, DOWN, buff=0.18)
-
-        self.play(GrowFromCenter(bg), run_time=0.6)
-        self.play(LaggedStart(*[Create(l) for l in lines], lag_ratio=0.04), run_time=0.6)
         self.play(
-            LaggedStart(*[GrowFromCenter(s) for s in stones], lag_ratio=0.12),
-            FadeIn(s_lbl, shift=UP * 0.08),
-            run_time=1.0,
+            *[FadeIn(t, shift=LEFT * 0.06) for t in min_tags],
+            FadeIn(max_tag, shift=LEFT * 0.06),
+            run_time=0.55,
         )
         self.wait(0.25)
-        self.play(GrowArrow(arr_in), run_time=0.5)
-        self.play(GrowFromCenter(box), Write(box_lbl), run_time=0.65)
-        self.play(GrowArrow(arr_out), run_time=0.45)
-        self.play(GrowFromCenter(score), FadeIn(score_sub, shift=UP * 0.08), run_time=0.65)
-        self.wait(1.4)
 
-        pipeline = VGroup(board_grp, s_lbl, arr_in, box, box_lbl, arr_out, score, score_sub)
-        self.play(pipeline.animate.scale(0.78).to_edge(UP, buff=0.48), run_time=1.1)
-        self.wait(0.2)
-        self._pipeline = pipeline
+        # D2 → D1: ghost copies flow upward, backed-up value appears
+        d1_score_lbls = []
+        for i, (d1_dot, d1_val) in enumerate(zip(self._d1, self.D1_SCORES)):
+            gl = self._score_lbls[i * 2].copy()
+            gr = self._score_lbls[i * 2 + 1].copy()
+            self.add(gl, gr)
 
-    def _phase_two_approaches(self):
-        # Left card: hand-coded features    Right card: neural network
+            stex = self._score_label(d1_val, font_size=24)
+            stex.next_to(d1_dot, DOWN, buff=0.16)
 
-        # ── shared card factory ───────────────────────────────────────────────
-        def _card(color, x_centre):
-            box = RoundedRectangle(
-                width=3.0, height=2.9, corner_radius=0.22,
-                fill_color=color, fill_opacity=0.08,
-                stroke_color=color, stroke_width=2.0,
+            self.play(
+                gl.animate.move_to(d1_dot.get_center()).set_opacity(0),
+                gr.animate.move_to(d1_dot.get_center()).set_opacity(0),
+                GrowFromCenter(stex),
+                run_time=0.75,
             )
-            box.move_to(np.array([x_centre, -1.05, 0.0]))
-            return box
+            self.remove(gl, gr)
+            d1_score_lbls.append(stex)
 
-        # ── hand-coded card ───────────────────────────────────────────────────
-        hand_box   = _card(self.C_HAND, -3.2)
-        hand_title = Text("hand-coded", font_size=22, color=self.C_HAND, weight="BOLD")
-        hand_title.next_to(hand_box, UP, buff=0.18)
+        self.wait(0.2)
 
-        feat_texts = ["material count", "king safety", "pawn structure", "mobility"]
-        features   = VGroup(*[Text(t, font_size=17, color=GRAY_B) for t in feat_texts])
-        features.arrange(DOWN, buff=0.24, aligned_edge=LEFT)
-        features.move_to(hand_box.get_center() + RIGHT * 0.18)
+        # D1 → root backup
+        root_stex = self._score_label(self.ROOT_SCORE, font_size=30)
+        root_stex.next_to(self._root, RIGHT, buff=0.22)
 
-        checks = VGroup(*[Text("✓", font_size=17, color=self.C_HAND) for _ in feat_texts])
-        checks.arrange(DOWN, buff=0.24)
-        checks.next_to(features, LEFT, buff=0.14)
+        gl2 = d1_score_lbls[0].copy()
+        gr2 = d1_score_lbls[1].copy()
+        self.add(gl2, gr2)
+        self.play(
+            gl2.animate.move_to(self._root.get_center()).set_opacity(0),
+            gr2.animate.move_to(self._root.get_center()).set_opacity(0),
+            GrowFromCenter(root_stex),
+            run_time=0.85,
+        )
+        self.remove(gl2, gr2)
+        self.wait(0.35)
 
-        hand_grp = VGroup(hand_box, hand_title, features, checks)
+        # Formula lands after the viewer sees the need for approximation
+        approx = MathTex(
+            r"\hat{V}_\theta(s) \;\approx\; V(s)", font_size=40, color=GRAY_B
+        )
+        approx.to_edge(DOWN, buff=0.52)
+        self.play(Write(approx), run_time=0.85)
+        self.wait(2.0)
 
-        # ── neural-network card ───────────────────────────────────────────────
-        nn_box   = _card(self.C_NN, 3.2)
-        nn_title = Text("neural network", font_size=22, color=self.C_NN, weight="BOLD")
-        nn_title.next_to(nn_box, UP, buff=0.18)
+        compress = Text(
+            "A huge future,\ncompressed into one number.",
+            font_size=21, color=GRAY_C, line_spacing=1.35,
+        )
+        compress.to_edge(DOWN, buff=0.42)
+        self.play(
+            FadeOut(approx, shift=UP * 0.06),
+            FadeIn(compress, shift=UP * 0.06),
+            run_time=0.6,
+        )
+        self.wait(1.8)
 
-        nc       = nn_box.get_center()
-        inp_ys   = [0.52, 0.0, -0.52]
-        hid_ys   = [0.26, -0.26]
+        all_tree = VGroup(
+            self._root, *self._d1, *self._d2,
+            *self._e01, *self._e12,
+            self._limit, self._fog, self._fog_branches,
+            *self._score_lbls, *d1_score_lbls, root_stex,
+            *min_tags, max_tag, compress,
+        )
+        self.play(FadeOut(all_tree), run_time=1.0)
+        self.wait(0.2)
+
+    def _phase_morph(self):
+        eval_box = self._eval_box
+        eval_lbl = self._eval_lbl
+
+        # Evaluator scales up to center stage
+        big_box = RoundedRectangle(
+            width=3.8, height=2.8, corner_radius=0.28,
+            fill_color=self.C_BOX, fill_opacity=0.14,
+            stroke_color=self.C_BOX, stroke_width=2.5,
+        )
+        big_box.move_to(ORIGIN)
+        big_lbl = MathTex(r"\hat{V}_\theta", font_size=40, color=self.C_BOX)
+        big_lbl.next_to(big_box, UP, buff=0.22)
+
+        self.play(
+            Transform(eval_box, big_box),
+            Transform(eval_lbl, big_lbl),
+            run_time=0.85,
+        )
+        self.wait(0.2)
+
+        # ── hand-coded interior ───────────────────────────────────────────────
+        feat_items = ["material count", "king safety", "pawn structure", "mobility"]
+        checks = VGroup(*[Text("✓", font_size=18, color=self.C_TRUE)
+                          for _ in feat_items])
+        feats  = VGroup(*[Text(t,   font_size=18, color=GRAY_B)
+                          for t in feat_items])
+        checks.arrange(DOWN, buff=0.28)
+        feats.arrange(DOWN, buff=0.28, aligned_edge=LEFT)
+        content = VGroup(checks, feats).arrange(RIGHT, buff=0.14)
+        content.move_to(big_box.get_center() + DOWN * 0.12)
+
+        hand_title = Text("hand-coded", font_size=19, color=self.C_TRUE,
+                          weight="BOLD")
+        hand_title.move_to(big_box.get_center() + UP * 1.05)
+
+        hand_interior = VGroup(hand_title, content)
+
+        self.play(
+            FadeIn(hand_title, shift=DOWN * 0.08),
+            LaggedStart(
+                *[FadeIn(VGroup(checks[i], feats[i]), shift=RIGHT * 0.08)
+                  for i in range(len(feat_items))],
+                lag_ratio=0.18,
+            ),
+            run_time=1.1,
+        )
+        self.wait(1.6)
+
+        # ── neural-network interior ───────────────────────────────────────────
+        nc     = big_box.get_center()
+        inp_ys = [+0.52,  0.0, -0.52]
+        hid_ys = [+0.26, -0.26]
 
         def _nd(x, y, col):
             d = Dot(np.array([x, y, 0.0]), radius=0.13, color=col)
             d.set_fill(col, opacity=0.85)
             return d
 
-        inp_dots = VGroup(*[_nd(nc[0] - 0.75, nc[1] + y, self.C_NN) for y in inp_ys])
-        hid_dots = VGroup(*[_nd(nc[0],          nc[1] + y, self.C_NN) for y in hid_ys])
-        out_dot  = _nd(nc[0] + 0.75, nc[1], self.C_NN)
+        inp_dots = VGroup(*[_nd(nc[0] - 0.88, nc[1] + y, self.C_EST)
+                            for y in inp_ys])
+        hid_dots = VGroup(*[_nd(nc[0],          nc[1] + y, self.C_EST)
+                            for y in hid_ys])
+        out_dot  = _nd(nc[0] + 0.88, nc[1], self.C_EST)
 
         nn_edges = VGroup()
         for iy in inp_ys:
             for hy in hid_ys:
                 nn_edges.add(Line(
-                    np.array([nc[0] - 0.75, nc[1] + iy, 0.0]),
+                    np.array([nc[0] - 0.88, nc[1] + iy, 0.0]),
                     np.array([nc[0],          nc[1] + hy, 0.0]),
-                    color=self.C_NN, stroke_width=0.9, stroke_opacity=0.4,
+                    color=self.C_EST, stroke_width=0.9, stroke_opacity=0.38,
                 ))
         for hy in hid_ys:
             nn_edges.add(Line(
-                np.array([nc[0],         nc[1] + hy, 0.0]),
-                np.array([nc[0] + 0.75,  nc[1],      0.0]),
-                color=self.C_NN, stroke_width=0.9, stroke_opacity=0.4,
+                np.array([nc[0],        nc[1] + hy, 0.0]),
+                np.array([nc[0] + 0.88, nc[1],       0.0]),
+                color=self.C_EST, stroke_width=0.9, stroke_opacity=0.38,
             ))
 
-        nn_grp = VGroup(nn_box, nn_title, nn_edges, inp_dots, hid_dots, out_dot)
+        nn_title = Text("neural network", font_size=19, color=self.C_EST,
+                        weight="BOLD")
+        nn_title.move_to(big_box.get_center() + UP * 1.05)
 
-        # ── divider + bottom note ─────────────────────────────────────────────
-        divider = Line(
-            np.array([0.0, -0.3, 0.0]), np.array([0.0, -3.0, 0.0]),
-            color=GRAY_E, stroke_width=1.0,
-        )
-        role = Text("same role: compress a huge future into one number",
-                    font_size=20, color=GRAY_C)
-        role.to_edge(DOWN, buff=0.48)
+        nn_interior = VGroup(nn_title, nn_edges, inp_dots, hid_dots, out_dot)
 
-        # ── animate ───────────────────────────────────────────────────────────
+        self.play(FadeOut(hand_interior), run_time=0.55)
         self.play(
-            LaggedStart(
-                AnimationGroup(FadeIn(hand_box, shift=RIGHT * 0.15), Write(hand_title)),
-                AnimationGroup(FadeIn(nn_box,   shift=LEFT  * 0.15), Write(nn_title)),
-                lag_ratio=0.3,
-            ),
-            Create(divider),
-            run_time=1.1,
-        )
-        self.play(
-            LaggedStart(
-                *[FadeIn(VGroup(checks[i], features[i]), shift=RIGHT * 0.1)
-                  for i in range(len(feat_texts))],
-                lag_ratio=0.18,
-            ),
-            run_time=1.2,
-        )
-        self.play(
+            FadeIn(nn_title, shift=DOWN * 0.08),
             Create(nn_edges),
             LaggedStart(
                 *[GrowFromCenter(d) for d in [*inp_dots, *hid_dots, out_dot]],
                 lag_ratio=0.1,
             ),
-            run_time=1.1,
+            run_time=1.0,
         )
-        self.play(FadeIn(role, shift=UP * 0.1), run_time=0.7)
-        self.wait(2.0)
+        self.wait(1.2)
 
-        self._two_cards = VGroup(hand_grp, nn_grp, divider, role)
-
-    def _phase_collapse(self):
-        # The whole future tree collapses into one scalar — key visual
-        self.play(FadeOut(self._two_cards), FadeOut(self._pipeline), run_time=0.9)
-        self.wait(0.15)
-
-        # Triangle representing the uncharted future tree
-        tree_tri = Triangle(stroke_color=GRAY_D, stroke_width=1.5, fill_opacity=0)
-        tree_tri.set_width(4.6).set_height(3.0).rotate(PI)
-        tree_tri.move_to(LEFT * 2.4 + UP * 0.2)
-
-        rng = np.random.default_rng(7)
-        density_dots = VGroup()
-        cx, cy = LEFT[0] * 2.4, 0.2
-        for _ in range(40):
-            rx = rng.uniform(-1.9, 1.9)
-            ry = rng.uniform(-1.3, 1.3)
-            if abs(rx) < (1.55 - abs(ry) * 0.65):
-                d = Dot(np.array([cx + rx, cy + ry, 0.0]),
-                        radius=0.042, color=GRAY_E)
-                d.set_fill(GRAY_E, opacity=rng.uniform(0.2, 0.6))
-                density_dots.add(d)
-
-        root_lbl = MathTex(r"s", font_size=30, color=self.C_TRUE)
-        root_lbl.next_to(tree_tri, UP, buff=0.16)
-        tree_grp = VGroup(tree_tri, density_dots, root_lbl)
-
-        arr = Arrow(
-            np.array([-0.4, 0.2, 0.0]),
-            np.array([ 1.8, 0.2, 0.0]),
-            color=GRAY_C, stroke_width=3,
-            max_tip_length_to_length_ratio=0.14,
-        )
-
-        result = MathTex(r"\hat{V}_\theta(s) = +0.73", font_size=46, color=self.C_EST)
-        result.move_to(RIGHT * 3.6 + UP * 0.2)
-
-        compress = Text("one number\nfor the whole future", font_size=20, color=GRAY_C,
-                        line_spacing=1.35)
-        compress.next_to(result, DOWN, buff=0.36)
-
-        self.play(
-            Create(tree_tri),
-            LaggedStart(*[GrowFromCenter(d) for d in density_dots], lag_ratio=0.04),
-            FadeIn(root_lbl, shift=DOWN * 0.08),
-            run_time=1.2,
-        )
-        self.wait(0.3)
-        self.play(GrowArrow(arr), run_time=0.6)
-
-        # Tree collapses into the scalar
-        self.play(
-            tree_grp.animate.scale(0.04).move_to(arr.get_left()).set_opacity(0),
-            GrowFromCenter(result),
-            run_time=1.4, rate_func=ease_out_quad,
-        )
-        self.play(FadeIn(compress, shift=UP * 0.1), run_time=0.6)
+        caption = Text("The machinery changed.  The role did not.",
+                       font_size=22, color=GRAY_C)
+        caption.to_edge(DOWN, buff=0.55)
+        self.play(FadeIn(caption, shift=UP * 0.1), run_time=0.65)
         self.wait(2.5)
 
-        self.play(FadeOut(VGroup(arr, result, compress)), run_time=1.1)
+        self.play(
+            FadeOut(VGroup(eval_box, eval_lbl, nn_interior, caption)),
+            run_time=1.0,
+        )
         self.wait(0.4)

@@ -45,8 +45,8 @@ class TreeExplosionScene(Scene):
 
     def _phase_intro(self):
         l1 = Text("Minimax is correct.", font_size=46, color=WHITE)
-        l2 = Text("But real games are too large to search completely.",
-                  font_size=28, color=GRAY_C)
+        l2 = Tex(r"But real games are too large to search completely.",
+                 font_size=28, color=GRAY_C)
         g = VGroup(l1, l2).arrange(DOWN, buff=0.52).move_to(ORIGIN)
 
         self.play(FadeIn(l1, shift=UP * 0.15), run_time=0.9)
@@ -57,8 +57,10 @@ class TreeExplosionScene(Scene):
         self.wait(0.2)
 
     def _phase_formula(self):
-        header = Text("nodes in a depth-d tree with branching factor b",
-                      font_size=20, color=GRAY_C)
+        header = Tex(
+            r"nodes in a depth-$d$ game tree with branching factor $b$",
+            font_size=24, color=GRAY_C,
+        )
 
         series = MathTex(
             r"1", r"\;+\;", r"b", r"\;+\;",
@@ -72,7 +74,7 @@ class TreeExplosionScene(Scene):
 
         approx = MathTex(r"\approx\; b^d", font_size=52, color=self.C_EXP)
         approx.next_to(series, DOWN, buff=0.55)
-        note = Text("exponential in search depth", font_size=22, color=GRAY_C)
+        note = Tex(r"exponential in search depth", font_size=22, color=GRAY_C)
         note.next_to(approx, DOWN, buff=0.3)
 
         self.play(FadeIn(header, shift=UP * 0.1), run_time=0.5)
@@ -142,17 +144,18 @@ class TreeExplosionScene(Scene):
         self.play(FadeIn(dtags[0], shift=LEFT * 0.1), run_time=0.4)
         self.wait(0.2)
 
-        # Depth 1 — annotate branching factor
+        # Depth 1 — annotate branching factor on left side of tree
         self.play(
             LaggedStart(*[Create(e) for e in edges[0]], lag_ratio=0.15),
             LaggedStart(*[GrowFromCenter(n) for n in nodes[1]], lag_ratio=0.15),
             run_time=0.9,
         )
-        mid_edge = edges[0][self.B // 2]
-        b_lbl    = MathTex(r"b\;\text{branches}", font_size=22, color=self.C_NODE)
-        b_lbl.next_to(mid_edge.get_midpoint(), RIGHT, buff=0.15)
+        xs1    = self._xs(1)
+        y_mid1 = (self._y(0) + self._y(1)) / 2
+        b_lbl  = MathTex(r"b\;\text{branches}", font_size=22, color=self.C_NODE)
+        b_lbl.move_to(np.array([xs1[0] - 0.85, y_mid1, 0.0]))
         self.play(
-            FadeIn(b_lbl, shift=UP * 0.08),
+            FadeIn(b_lbl, shift=RIGHT * 0.08),
             FadeIn(dtags[1], shift=LEFT * 0.1),
             run_time=0.5,
         )
@@ -165,10 +168,18 @@ class TreeExplosionScene(Scene):
             run_time=1.1,
         )
         self.play(FadeIn(dtags[2], shift=LEFT * 0.1), run_time=0.4)
+        self.wait(0.2)
+
+        # Label slides down and morphs to b^2
+        xs2    = self._xs(2)
+        y_mid2 = (self._y(1) + self._y(2)) / 2
+        b2_lbl = MathTex(r"b^2\;\text{branches}", font_size=22, color=self.C_NODE)
+        b2_lbl.move_to(np.array([xs2[0] - 0.85, y_mid2, 0.0]))
+        self.play(Transform(b_lbl, b2_lbl), run_time=0.65)
         self.wait(0.3)
+        self.play(FadeOut(b_lbl), run_time=0.4)
 
         # Depth 3 — crowded, shows the explosion
-        self.play(FadeOut(b_lbl), run_time=0.3)
         self.play(
             LaggedStart(*[Create(e) for e in edges[2]], lag_ratio=0.02),
             LaggedStart(*[GrowFromCenter(n) for n in nodes[3]], lag_ratio=0.02),
@@ -244,70 +255,67 @@ class TreeExplosionScene(Scene):
         self._ghost_lines = ghost_lines
 
     def _phase_numbers(self):
-        # Show concrete node counts for Chess and Go — floating over the fog
-        # Row data: (game label, b value, d value, result tex, result color)
-        rows = [
-            (r"\text{Chess}", r"b \approx 35",  r"d \approx 40",  r"\approx 10^{62}",  WHITE),
-            (r"\text{Go}",    r"b \approx 250", r"d \approx 150", r"\approx 10^{359}", WHITE),
+        row_data = [
+            (r"\text{Chess}", r"b \approx 35",  r"d \approx 80",  r"\approx 10^{123}"),
+            (r"\text{Go}",    r"b \approx 250", r"d \approx 150", r"\approx 10^{360}"),
         ]
 
-        col_game   = VGroup()
-        col_b      = VGroup()
-        col_d      = VGroup()
-        col_result = VGroup()
+        all_rows: list = []
+        for game_tex, b_tex, d_tex, res_tex in row_data:
+            all_rows.append([
+                MathTex(game_tex,       font_size=30, color=GRAY_B),
+                MathTex(b_tex,          font_size=30, color=self.C_EXP),
+                MathTex(d_tex,          font_size=30, color=self.C_EXP),
+                MathTex(r"\Rightarrow", font_size=30, color=GRAY_D),
+                MathTex(res_tex,        font_size=30, color=WHITE),
+            ])
 
-        for game_tex, b_tex, d_tex, res_tex, res_col in rows:
-            col_game.add(  MathTex(game_tex,  font_size=30, color=GRAY_B))
-            col_b.add(     MathTex(b_tex,     font_size=30, color=self.C_EXP))
-            col_d.add(     MathTex(d_tex,     font_size=30, color=self.C_EXP))
-            col_result.add(MathTex(res_tex,   font_size=30, color=res_col))
+        # Arrange each row aligned by bottom edge so superscripts don't pull results down
+        for row in all_rows:
+            VGroup(*row).arrange(RIGHT, buff=0.38, aligned_edge=DOWN)
 
-        col_game.arrange(DOWN,   buff=0.42, aligned_edge=RIGHT)
-        col_b.arrange(DOWN,      buff=0.42, aligned_edge=LEFT)
-        col_d.arrange(DOWN,      buff=0.42, aligned_edge=LEFT)
-        col_result.arrange(DOWN, buff=0.42, aligned_edge=LEFT)
+        # Snap all rows to row-0's column x-positions so columns align
+        col_xs = [c.get_center()[0] for c in all_rows[0]]
+        for row in all_rows[1:]:
+            for j, cell in enumerate(row):
+                cell.set_x(col_xs[j])
 
-        sep   = MathTex(r"\Rightarrow", font_size=30, color=GRAY_D)
-        sep2  = sep.copy()
-        seps  = VGroup(sep, sep2).arrange(DOWN, buff=0.42)
+        # Separate rows vertically
+        row_ys = [0.35, -0.35]
+        for i, row in enumerate(all_rows):
+            for cell in row:
+                cell.set_y(row_ys[i])
 
-        table = VGroup(col_game, col_b, col_d, seps, col_result)
-        table.arrange(RIGHT, buff=0.38, aligned_edge=UP)
-
-        # Place in the fog — vertically centred in the dark region below the tree
+        all_cells = VGroup(*[c for row in all_rows for c in row])
         y_fog_centre = self._y(3) - 0.6
-        table.move_to(np.array([0.0, y_fog_centre, 0.0]))
+        all_cells.move_to(np.array([0.0, y_fog_centre, 0.0]))
 
-        ref = MathTex(
-            r"\text{atoms in the observable universe} \approx 10^{80}",
-            font_size=20, color=GRAY_D,
-        )
-        ref.next_to(table, DOWN, buff=0.42)
+        # Computation-time annotations — created here, animated in _phase_depth_limit
+        time_strs = [
+            r"\sim 10^{97}\ \text{yrs on fastest supercomputer}",
+            r"\sim 10^{334}\ \text{yrs — beyond all conceivable computation}",
+        ]
+        time_annots = VGroup()
+        for i, s in enumerate(time_strs):
+            ta = MathTex(s, font_size=19, color=GRAY_C)
+            ta.next_to(all_rows[i][4], DOWN, buff=0.09).align_to(all_rows[i][4], LEFT)
+            time_annots.add(ta)
+        self._time_annots = time_annots
 
         # Animate rows one at a time
-        for i in range(len(rows)):
+        for i, row in enumerate(all_rows):
             self.play(
-                LaggedStart(
-                    FadeIn(col_game[i],   shift=UP * 0.08),
-                    FadeIn(col_b[i],      shift=UP * 0.08),
-                    FadeIn(col_d[i],      shift=UP * 0.08),
-                    FadeIn(seps[i],       shift=UP * 0.08),
-                    FadeIn(col_result[i], shift=UP * 0.08),
-                    lag_ratio=0.18,
-                ),
+                LaggedStart(*[FadeIn(c, shift=UP * 0.08) for c in row], lag_ratio=0.18),
                 run_time=1.0,
             )
             self.wait(0.5)
 
-        self.play(FadeIn(ref, shift=UP * 0.08), run_time=0.7)
-        self.wait(2.0)
-
-        self._numbers_grp = VGroup(table, ref)
+        self.wait(1.5)
+        self._numbers_grp = VGroup(all_cells, time_annots)
 
     def _phase_depth_limit(self):
-        # Centered dashed line cuts the tree between depth 2 and the fog
-        y_limit  = self._y(2) - 0.52
-        half_w   = 5.2   # symmetric around x = 0, stops just inside the depth tags
+        y_limit = self._y(2) - 0.52
+        half_w  = 5.2
 
         line = DashedLine(
             np.array([-half_w, y_limit, 0.0]),
@@ -316,14 +324,20 @@ class TreeExplosionScene(Scene):
             dash_length=0.18,
         )
 
-        stop = Text("Search stops here.", font_size=26, color=self.C_LIM)
-        game = Text("But the game does not.", font_size=26, color=GRAY_C)
-        VGroup(stop, game).arrange(DOWN, buff=0.24).next_to(line, UP, buff=0.32)
+        label = Tex(r"Full search must stop early.", font_size=26, color=self.C_LIM)
+        label.next_to(line, DOWN, buff=0.28)
 
-        self.play(Create(line), run_time=0.9)
-        self.wait(0.15)
-        self.play(FadeIn(stop, shift=UP * 0.1), run_time=0.65)
-        self.play(FadeIn(game, shift=UP * 0.1), run_time=0.65)
+        # Draw limit line and reveal computation-time cost simultaneously
+        self.play(
+            Create(line),
+            LaggedStart(
+                *[FadeIn(ta, shift=UP * 0.06) for ta in self._time_annots],
+                lag_ratio=0.5,
+            ),
+            run_time=1.2,
+        )
+        self.wait(0.3)
+        self.play(FadeIn(label, shift=UP * 0.1), run_time=0.65)
         self.wait(2.5)
 
         # Fade everything out — hands off to the evaluation scene
@@ -333,7 +347,7 @@ class TreeExplosionScene(Scene):
             *self._dtags,
             self._fog,
             self._numbers_grp,
-            line, stop, game,
+            line, label,
         )
         self.play(FadeOut(all_mobs), run_time=1.3)
         self.wait(0.4)
