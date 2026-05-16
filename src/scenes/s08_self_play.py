@@ -299,12 +299,7 @@ class SelfPlayScene(Scene):
 
         # ── right: self-play stack that keeps growing ─────────────────────────
         batch_labels = ["500K", "5M", "50M", "500M+"]
-        batch_cols   = [
-            interpolate_color(self.C_NET, WHITE, 0.0),
-            interpolate_color(self.C_NET, WHITE, 0.08),
-            interpolate_color(self.C_NET, WHITE, 0.16),
-            interpolate_color(self.C_NET, WHITE, 0.24),
-        ]
+        batch_cols = [self.C_NET] * 4
 
         sp_batches = []
         sp_brace   = None

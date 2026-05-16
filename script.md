@@ -550,7 +550,7 @@ Then future influence lines appear across the board.
 > The move is not alien because it is random.
 > It is alien because it is optimized for a geometry of the game we do not naturally see.
 
-Keep this.
+
 
 # The revised thesis
 
