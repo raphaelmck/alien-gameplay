@@ -6,17 +6,17 @@ import numpy as np
 class AlienMovesScene(ThreeDScene):
     """Scene 9 – Why alien moves happen (climax)."""
 
-    BG          = "#000000"
-    BOARD_COLOR = "#C8A96E"
-    GRID_COLOR  = "#1A1A1A"
-    BLACK_STONE = "#1A1A1A"
-    WHITE_STONE = "#F5F5F5"
-    STONE_Z     = 0.025
+    BG            = "#000000"
+    BOARD_COLOR   = "#C8A96E"
+    GRID_COLOR    = "#1A1A1A"
+    BLACK_STONE   = "#1A1A1A"
+    WHITE_STONE   = "#F5F5F5"
+    SUPPORT_COLOR = "#1E1510"  # warm dark wood — same hue across all cube faces
 
-    C_HUMAN = "#F0A500"   # amber  — human side
-    C_MACH  = "#A78BFA"   # purple — machine side
-    C_INFL  = "#5B9BD5"   # blue   — influence lines
-    C_DIM   = "#505050"   # muted  — secondary labels
+    C_HUMAN = "#F0A500"
+    C_MACH  = "#A78BFA"
+    C_INFL  = "#5B9BD5"
+    C_DIM   = "#505050"
 
     BOARD_SIZE = 6.0
     MOVE_37    = (14, 9)
@@ -31,7 +31,6 @@ class AlienMovesScene(ThreeDScene):
         self.begin_ambient_camera_rotation(rate=0.06)
         self.wait(3.0)
 
-        # ── overlays play while board keeps spinning ───────────────────────────
         self._phase_questions()
         self._phase_stats()
         self._phase_influence()
@@ -45,17 +44,20 @@ class AlienMovesScene(ThreeDScene):
         y = j * self.SPACING - self.BOARD_SIZE / 2
         return np.array([x, y, z])
 
+    def _stone_r(self):
+        return self.SPACING * 0.46
+
     def _stone(self, color):
-        r = self.SPACING * 0.46
-        sc = "#C0C0C0" if color == self.WHITE_STONE else "#2A2A2A"
-        s = Circle(radius=r)
-        s.set_fill(color, opacity=1)
-        s.set_stroke(color=sc, width=0.8)
+        r = self._stone_r()
+        s = Sphere(radius=r, resolution=(18, 18))
+        s.set_color(color)
+        s.set_opacity(1)
         return s
 
     def _build_board_instant(self):
+        # Board support — cascade same warm-dark fill to every cube face
         support = Cube(stroke_width=0)
-        support.set_fill(BLACK, opacity=1)
+        support.set_fill(self.SUPPORT_COLOR, opacity=1)
         support.set_stroke(width=0)
         w = self.BOARD_SIZE - 2.5
         support.scale(np.array([w, w, 0.28]))
@@ -69,11 +71,11 @@ class AlienMovesScene(ThreeDScene):
         grid_lines = VGroup()
         for i in range(19):
             grid_lines.add(Line(
-                self._pt(i, 0, z_line), self._pt(i, 18, z_line),
+                self._pt(i,  0, z_line), self._pt(i, 18, z_line),
                 color=self.GRID_COLOR, stroke_width=1.5,
             ))
             grid_lines.add(Line(
-                self._pt(0, i, z_line), self._pt(18, i, z_line),
+                self._pt(0,  i, z_line), self._pt(18, i, z_line),
                 color=self.GRID_COLOR, stroke_width=1.5,
             ))
 
@@ -82,101 +84,107 @@ class AlienMovesScene(ThreeDScene):
             for i in [3, 9, 15] for j in [3, 9, 15]
         ])
 
-        all_moves = [
+        prior_moves = [
             (15,15),(3,3),(2,15),(16,3),(14,3),(14,2),(13,2),
             (15,2),(2,5),(5,2),(12,3),(16,5),(8,16),(3,9),
             (15,4),(16,4),(2,3),(2,2),(1,2),(2,4),(1,3),
             (1,4),(3,4),(1,5),(3,2),(4,3),(3,1),(2,6),
             (9,3),(2,12),(4,15),(16,13),(16,14),(15,13),(13,15),(15,10),
-            self.MOVE_37,  # move 37 — black
         ]
+        r = self._stone_r()
+        sz = r  # sphere center sits one radius above the board surface
 
         stones = VGroup()
-        for idx, (cx, cy) in enumerate(all_moves):
+        for idx, (cx, cy) in enumerate(prior_moves):
             color = self.BLACK_STONE if idx % 2 == 0 else self.WHITE_STONE
             s = self._stone(color)
-            s.move_to(self._pt(cx, cy, self.STONE_Z))
+            s.move_to(self._pt(cx, cy, sz))
             stones.add(s)
+
+        # Move 37 — purple
+        m37 = self._stone(self.C_MACH)
+        m37.move_to(self._pt(*self.MOVE_37, sz))
+        stones.add(m37)
 
         self.add(support, board, grid_lines, stars, stones)
 
     # ── phases ────────────────────────────────────────────────────────────────
 
     def _phase_questions(self):
-        def _col(label_txt, q_txt, color):
-            lbl = Text(label_txt, font_size=14, color=self.C_DIM)
-            q   = Text(q_txt,     font_size=19, color=color)
+        def _col(label, question, color):
+            lbl = Tex(label,    font_size=22, color=self.C_DIM)
+            q   = Tex(question, font_size=32, color=color)
             col = VGroup(lbl, q)
             col.arrange(DOWN, aligned_edge=LEFT, buff=0.16)
             return col
 
-        human_col = _col("Human question:", "Does this look natural?", self.C_HUMAN)
-        mach_col  = _col("Machine question:", "Does this improve Vθ(s)?", self.C_MACH)
+        human = _col(r"Human question:", r"Does this look natural?",          self.C_HUMAN)
+        mach  = _col(r"Machine question:", r"Does this improve $V_\theta(s)$?", self.C_MACH)
 
-        divider = Line(UP * 0.55, DOWN * 0.55, color=self.C_DIM, stroke_width=0.8)
+        divider = Line(UP * 0.62, DOWN * 0.62, color=self.C_DIM, stroke_width=0.8)
 
-        panel = VGroup(human_col, divider, mach_col)
-        panel.arrange(RIGHT, buff=0.48, aligned_edge=UP)
-        panel.to_corner(UL, buff=0.45)
+        panel = VGroup(human, divider, mach)
+        panel.arrange(RIGHT, buff=0.55, aligned_edge=UP)
+        panel.to_edge(UP, buff=0.5)
 
         self.add_fixed_in_frame_mobjects(panel)
-        self.play(FadeIn(panel), run_time=1.2, rate_func=smooth)
+        self.play(
+            LaggedStart(Write(human), FadeIn(divider), Write(mach), lag_ratio=0.3),
+            run_time=2.0,
+        )
         self.wait(3.5)
         self.play(FadeOut(panel), run_time=0.9)
         self.wait(0.4)
 
     def _phase_stats(self):
-        def _row(label, value, v_color):
-            lbl = Text(label, font_size=13, color=self.C_DIM)
-            val = Text(value, font_size=13, color=v_color)
-            row = VGroup(lbl, val)
-            row.arrange(RIGHT, buff=0.3)
-            return row
+        def _stat(math_lbl, value, v_color):
+            lbl = MathTex(math_lbl, font_size=18, color=self.C_DIM)
+            val = Tex(value,        font_size=18, color=v_color)
+            grp = VGroup(lbl, val)
+            grp.arrange(RIGHT, buff=0.28)
+            return grp
 
-        rows = VGroup(
-            _row("πθ(a | s) :", "low human-like probability", self.C_HUMAN),
-            _row("Vθ(T(s,a)):", "high long-term value",       self.C_MACH),
-            _row("MCTS visits:", "unexpectedly high",         self.C_INFL),
-        )
-        rows.arrange(DOWN, aligned_edge=LEFT, buff=0.2)
-        rows.to_corner(DL, buff=0.45)
+        s1 = _stat(r"\pi_\theta(a \mid s) :", r"low human-like probability", self.C_HUMAN)
+        s2 = _stat(r"V_\theta(T(s,a)) :",     r"high long-term value",        self.C_MACH)
+        s3 = _stat(r"\text{MCTS visits} :",   r"unexpectedly high",           self.C_INFL)
 
-        self.add_fixed_in_frame_mobjects(rows)
+        row = VGroup(s1, s2, s3)
+        row.arrange(RIGHT, buff=0.7)
+        row.to_edge(DOWN, buff=0.5)
+
+        self.add_fixed_in_frame_mobjects(row)
         self.play(
-            LaggedStart(*[FadeIn(r) for r in rows], lag_ratio=0.5),
-            run_time=2.0,
+            LaggedStart(Write(s1), Write(s2), Write(s3), lag_ratio=0.4),
+            run_time=2.2,
         )
         self.wait(3.5)
-        self._stats_rows = rows
+        self._stats_row = row
 
     def _phase_influence(self):
         cx, cy = self.MOVE_37
-        origin = self._pt(cx, cy, 0.045)
+        origin = self._pt(cx, cy, self._stone_r() * 2)
 
         targets = [
-            (3,  3),   # bottom-left corner cluster
-            (15, 3),   # bottom-right corner cluster
-            (3,  15),  # top-left corner
-            (15, 15),  # top-right corner — Q16
-            (9,  16),  # top-center
-            (16, 10),  # R11 — right-side contest
-            (2,  9),   # D10 — left-side stone
+            (3,  3),
+            (15, 3),
+            (3,  15),
+            (15, 15),
+            (9,  16),
+            (16, 10),
+            (2,  9),
         ]
 
         lines = VGroup(*[
-            Line(
-                origin, self._pt(tx, ty, 0.045),
-                color=self.C_INFL, stroke_width=1.2,
-            ).set_stroke(opacity=0.5)
+            Line(origin, self._pt(tx, ty, self._stone_r()), color=self.C_INFL, stroke_width=1.2)
+            .set_stroke(opacity=0.5)
             for tx, ty in targets
         ])
 
         self.play(
-            FadeOut(self._stats_rows),
+            FadeOut(self._stats_row),
             LaggedStart(*[Create(l) for l in lines], lag_ratio=0.1),
             run_time=2.2,
         )
         self.wait(2.8)
         self.play(FadeOut(lines), run_time=1.2)
         self.wait(0.4)
-
