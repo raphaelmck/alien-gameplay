@@ -531,7 +531,7 @@ class SelfPlayScene(Scene):
         inf_sym = MathTex(r"\infty", font_size=62, color=self.C_NET)
         inf_sym.move_to(np.array([cx_sp, 2.55, 0.0]))
         sp_count = Tex(r"billions per run", font_size=20, color=self.C_NET)
-        sp_count.next_to(inf_sym, DOWN, buff=0.14)
+        sp_count.next_to(sp_title, DOWN, buff=0.08)
 
         self.play(FadeIn(inf_sym, scale=0.55), run_time=0.45)
         self.play(FadeIn(sp_count, shift=UP * 0.05), run_time=0.30)
