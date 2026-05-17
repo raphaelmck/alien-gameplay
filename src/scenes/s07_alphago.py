@@ -86,13 +86,16 @@ class AlphaGoScene(Scene):
         c.set_fill(color, opacity=fill_opacity)
         c.set_stroke(color=color, width=2.0)
         c.move_to(pos)
+        c.set_z_index(1)   # always render above edges (z_index=-1)
         return c
 
     def _tree_edge(self, p1, p2, color=GRAY_D, width=1.5, clip=0.32):
         d = p2 - p1
         d_norm = d / np.linalg.norm(d)
-        return Line(p1 + d_norm * clip, p2 - d_norm * clip,
+        line = Line(p1 + d_norm * clip, p2 - d_norm * clip,
                     color=color, stroke_width=width)
+        line.set_z_index(-1)   # always render behind nodes
+        return line
 
     # ─── phases ───────────────────────────────────────────────────────────────
 
@@ -215,7 +218,7 @@ class AlphaGoScene(Scene):
             run_time=0.35,
         )
 
-        # Probability map – rings only (ghost / outline pieces), size+opacity by prob
+        # Probability map – filled ghost pieces, same stone size, opacity encodes probability
         heat_probs = {
             (0,0):0.04, (1,0):0.06, (2,0):0.08, (3,0):0.05, (4,0):0.04,
             (0,1):0.07, (2,1):0.12, (3,1):0.09,
@@ -224,39 +227,35 @@ class AlphaGoScene(Scene):
             (0,4):0.05, (1,4):0.55, (2,4):0.22, (3,4):0.14, (4,4):0.09,
         }
 
-        pulse_rings = VGroup()
+        ghost_pieces = VGroup()
         for (ci, cj), prob in heat_probs.items():
-            r       = self.STONE_R * (0.80 + prob * 0.55)
-            opacity = min(0.45 + prob * 0.85, 1.0)
-            ring    = Circle(radius=r, fill_opacity=0)
-            ring.set_stroke(color=self.C_POLICY, width=2.2, opacity=opacity)
-            ring.move_to(self.gp(ci, cj))
-            ring.set_z_index(2)
-            pulse_rings.add(ring)
+            # min opacity 0.35 so every piece is clearly visible
+            opacity = min(0.35 + prob * 1.10, 0.95)
+            ghost   = Circle(radius=self.STONE_R)
+            ghost.set_fill(self.C_POLICY, opacity=opacity)
+            ghost.set_stroke(color=self.C_POLICY, width=0.8, opacity=opacity * 0.5)
+            ghost.move_to(self.gp(ci, cj))
+            ghost.set_z_index(2)
+            ghost_pieces.add(ghost)
 
-        # Rings appear (pulse in), then s label rises
+        # Pieces appear; s label rises at the same time
         self.play(
-            LaggedStart(*[GrowFromCenter(r) for r in pulse_rings], lag_ratio=0.020),
+            LaggedStart(*[GrowFromCenter(g) for g in ghost_pieces], lag_ratio=0.020),
             s_lbl.animate.shift(UP * 0.34),
             run_time=0.80,
         )
-        self.wait(0.40)
+        self.wait(0.55)
 
-        # Rings pulse outward and fade — leaving a clean board
-        self.play(
-            *[r.animate.scale(2.2).set_opacity(0) for r in pulse_rings],
-            run_time=0.65,
-            rate_func=ease_out_quad,
-        )
-        self.remove(*pulse_rings)
-
-        # Top candidate
+        # Top candidate: only this one gets a pulse ring
         top_pos  = self.gp(1, 4)
-        top_ring = Circle(radius=self.STONE_R * 1.38,
+        top_ring = Circle(radius=self.STONE_R * 1.45,
                           stroke_color=self.C_POLICY, stroke_width=2.5, fill_opacity=0)
         top_ring.move_to(top_pos).set_z_index(3)
         prob_lbl = MathTex(r"p = 0.55", font_size=16, color=self.C_POLICY)
-        prob_lbl.next_to(top_pos, UR, buff=0.06).set_z_index(3)
+        # top_pos is near the board top edge — place label above the board
+        board_top = self.BC[1] + (self.SIDE + 0.35) / 2
+        prob_lbl.move_to(np.array([top_pos[0], board_top + 0.28, 0.0]))
+        prob_lbl.set_z_index(3)
 
         self.play(Create(top_ring), FadeIn(prob_lbl), run_time=0.45)
         pulse = top_ring.copy()
@@ -267,7 +266,7 @@ class AlphaGoScene(Scene):
         self.wait(0.65)
 
         self.play(
-            FadeOut(top_ring), FadeOut(prob_lbl),
+            FadeOut(ghost_pieces), FadeOut(top_ring), FadeOut(prob_lbl),
             policy_box.animate.set_fill(opacity=0.08).set_stroke(width=1.8),
             s_lbl.animate.shift(DOWN * 0.34),
             run_time=0.50,
@@ -328,35 +327,32 @@ class AlphaGoScene(Scene):
         self.wait(0.15)
 
     def _phase_mcts_tree(self, m):
-        # Fade board + the first two boxes/arrows; leave the MCTS box on screen
-        fade_partial = VGroup(
-            m["bg"], m["lines"], m["stones"], m["s_lbl"],
-            m["comp_boxes"][0], m["comp_boxes"][1],
-            m["comp_arrows"][0], m["comp_arrows"][1],  # NOT the MCTS arrow
-            m["comp_labels"][0], m["comp_labels"][1],
-        )
-        self.play(FadeOut(fade_partial), run_time=0.75)
-
         mcts_box = m["comp_boxes"][2][0]
         mcts_div = m["comp_boxes"][2][1]
         mcts_f   = m["comp_labels"][2][0]   # "MCTS" label
         mcts_sub = m["comp_labels"][2][1]   # "tree search"
-        mcts_arr = m["comp_arrows"][2]
 
-        # Fade the MCTS arrow and subtitle, then undraw the box border
-        self.play(FadeOut(mcts_arr), FadeOut(mcts_sub), run_time=0.30)
+        # Everything except the MCTS label fades simultaneously — including all
+        # three arrows, the logo, and the "tree search" subtitle.
+        fade_all = VGroup(
+            m["bg"], m["lines"], m["stones"], m["s_lbl"],
+            m["comp_boxes"][0], m["comp_boxes"][1],
+            m["comp_arrows"][0], m["comp_arrows"][1], m["comp_arrows"][2],
+            m["comp_labels"][0], m["comp_labels"][1],
+            mcts_sub,
+            m["logo"],
+        )
+        self.play(FadeOut(fade_all), run_time=0.75)
+
+        # Undraw the MCTS box borders (label stays)
         self.play(Uncreate(mcts_box), Uncreate(mcts_div), run_time=0.60)
 
-        # Fly MCTS label to top-centre, hide logo at the same time
+        # Fly MCTS label straight to top-centre
         title_target = mcts_f.copy()
         title_target.to_edge(UP, buff=0.42)
-        title_target.set_x(0)   # horizontally centred
+        title_target.set_x(0)
 
-        self.play(
-            Transform(mcts_f, title_target),
-            FadeOut(m["logo"]),
-            run_time=0.55,
-        )
+        self.play(Transform(mcts_f, title_target), run_time=0.50)
         title = mcts_f
 
         # ── Tree geometry ─────────────────────────────────────────────────────
@@ -375,6 +371,7 @@ class AlphaGoScene(Scene):
         # Root node
         root_nd = self._tree_node(ROOT_P, self.C_SEARCH, radius=0.33, fill_opacity=0.22)
         root_lb = MathTex("s", font_size=20, color=GRAY_B).move_to(ROOT_P)
+        root_lb.set_z_index(2)
         self.play(GrowFromCenter(root_nd), Write(root_lb), run_time=0.42)
 
         # L1: edge thickness + node size encode policy probability
@@ -390,9 +387,9 @@ class AlphaGoScene(Scene):
             edge = self._tree_edge(ROOT_P, pos, color=self.C_SEARCH,
                                    width=ew, clip=max(r, 0.33))
             mid  = (ROOT_P + pos) / 2
-            side = LEFT * 0.30 if i == 0 else RIGHT * 0.28
-            plbl = MathTex(f"p={policy:.2f}", font_size=12, color=self.C_POLICY)
-            plbl.move_to(mid + side + UP * 0.07)
+            side = LEFT * 0.45 if i == 0 else RIGHT * 0.42
+            plbl = MathTex(f"p={policy:.2f}", font_size=15, color=self.C_POLICY)
+            plbl.move_to(mid + side + UP * 0.10)
             l1_nodes.append(node)
             l1_edges.append(edge)
             l1_plbls.append(plbl)
@@ -432,6 +429,7 @@ class AlphaGoScene(Scene):
         def run_sim(l1_idx, result, l2_expand=None, seed=0):
             flash = l1_edges[l1_idx].copy()
             flash.set_stroke(color=self.C_MOVE, width=6.0, opacity=1.0)
+            flash.set_z_index(2)   # flash must be visible over nodes
             self.play(Create(flash), run_time=0.15)
 
             l2_nd = l2_ed = None
@@ -476,6 +474,7 @@ class AlphaGoScene(Scene):
                 self.remove(n_labels[l1_idx])
             nlbl = Tex(f"N={n_visits[l1_idx]}", font_size=11, color=WHITE)
             nlbl.move_to(L1_POS[l1_idx])
+            nlbl.set_z_index(2)
             self.add(nlbl)
             n_labels[l1_idx] = nlbl
 
@@ -492,6 +491,7 @@ class AlphaGoScene(Scene):
         self.wait(0.25)
 
         best_edge = l1_edges[0].copy().set_stroke(color=self.C_MOVE, width=5.5)
+        best_edge.set_z_index(-1)   # render behind nodes
         best_star = Star(n=5, outer_radius=0.22, color=self.C_MOVE, fill_opacity=0.92)
         best_star.set_stroke(width=0).move_to(L1_POS[0])
         self.play(Create(best_edge), GrowFromCenter(best_star), run_time=0.50)
@@ -537,7 +537,6 @@ class AlphaGoScene(Scene):
 
         self.play(Write(ucb[0]), run_time=0.80)
         self.play(Write(ucb[1]), run_time=0.25)
-        # exploration term: slower, smooth fade-in rather than stroke-by-stroke
-        self.play(FadeIn(ucb[2], shift=RIGHT * 0.12), run_time=1.40)
+        self.play(Write(ucb[2]), run_time=1.80)   # same animation, slower
         self.play(FadeIn(caption, shift=UP * 0.08), run_time=0.55)
         self.wait(2.5)

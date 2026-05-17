@@ -33,7 +33,6 @@ class AlienMovesScene(ThreeDScene):
 
         self._phase_questions()
         self._phase_stats()
-        self._phase_influence()
 
         self.wait(2.0)
 
@@ -49,9 +48,7 @@ class AlienMovesScene(ThreeDScene):
 
     def _stone(self, color):
         r = self._stone_r()
-        s = Sphere(radius=r, resolution=(18, 18))
-        s.set_color(color)
-        s.set_opacity(1)
+        s = Sphere(radius=r, resolution=(18, 18), checkerboard_colors=[color, color])
         return s
 
     def _build_board_instant(self):
@@ -158,33 +155,4 @@ class AlienMovesScene(ThreeDScene):
             run_time=2.2,
         )
         self.wait(3.5)
-        self._stats_row = row
-
-    def _phase_influence(self):
-        cx, cy = self.MOVE_37
-        origin = self._pt(cx, cy, self._stone_r() * 2)
-
-        targets = [
-            (3,  3),
-            (15, 3),
-            (3,  15),
-            (15, 15),
-            (9,  16),
-            (16, 10),
-            (2,  9),
-        ]
-
-        lines = VGroup(*[
-            Line(origin, self._pt(tx, ty, self._stone_r()), color=self.C_INFL, stroke_width=1.2)
-            .set_stroke(opacity=0.5)
-            for tx, ty in targets
-        ])
-
-        self.play(
-            FadeOut(self._stats_row),
-            LaggedStart(*[Create(l) for l in lines], lag_ratio=0.1),
-            run_time=2.2,
-        )
-        self.wait(2.8)
-        self.play(FadeOut(lines), run_time=1.2)
-        self.wait(0.4)
+        self.play(FadeOut(row), run_time=1.0)
