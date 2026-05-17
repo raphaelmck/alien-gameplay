@@ -230,30 +230,41 @@ class Move37ColdOpen(ThreeDScene):
         lbl_color = ManimColor("#505050")
 
         labels = VGroup(
-            Text("Human prior",   font_size=13, color=lbl_color),
-            Text("Machine value", font_size=13, color=lbl_color),
+            Text("Human prior",   font_size=20, color=lbl_color),
+            Text("Machine value", font_size=20, color=lbl_color),
         )
         values = VGroup(
-            Text("unlikely", font_size=13, color=ManimColor("#787878")),
-            Text("high",     font_size=13, color=ManimColor("#D49A22")),
+            Text("unlikely", font_size=20, color=ManimColor("#787878")),
+            Text("high",     font_size=20, color=ManimColor("#D49A22")),
         )
 
-        labels.arrange(DOWN, aligned_edge=LEFT,  buff=0.16)
-        values.arrange(DOWN, aligned_edge=LEFT,  buff=0.16)
-        values.next_to(labels, RIGHT, buff=0.45)
+        labels.arrange(DOWN, aligned_edge=LEFT,  buff=0.20)
+        values.arrange(DOWN, aligned_edge=LEFT,  buff=0.20)
+        values.next_to(labels, RIGHT, buff=0.50)
 
         group = VGroup(labels, values)
-        group.to_corner(DR, buff=0.38)
+        group.to_edge(RIGHT, buff=0.42)
+        group.set_y(0)
         return group
 
-    def create_attention_caption(self) -> Text:
-        caption = Text(
-            "where the obvious fight seems to be",
-            font_size=14,
-            color=ManimColor("#585858"),
-        )
-        caption.to_corner(DL, buff=0.38)
-        return caption
+    def create_attention_caption(self) -> VGroup:
+        amber = ManimColor("#D49A22")
+        text_color = ManimColor("#585858")
+
+        swatch = Square(side_length=0.22)
+        swatch.set_fill(amber, opacity=1)
+        swatch.set_stroke(width=0)
+
+        line1 = Text("where the obvious", font_size=20, color=text_color)
+        line2 = Text("fight seems to be", font_size=20, color=text_color)
+        lines = VGroup(line1, line2).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
+
+        legend = VGroup(swatch, lines)
+        legend.arrange(RIGHT, buff=0.20, aligned_edge=UP)
+
+        legend.to_edge(LEFT, buff=0.50)
+        legend.set_y(0)
+        return legend
 
     # ==========================================
     # ANIMATION SEQUENCES
@@ -278,7 +289,6 @@ class Move37ColdOpen(ThreeDScene):
             color = self.BLACK_STONE if (i % 2 == 0) else self.WHITE_STONE
             stone = self.create_stone(color)
             stone.move_to(self.board_to_point(cx, cy, self.STONE_Z))
-            self.add(stone)
             stone_anims.append(GrowFromCenter(stone, rate_func=_ease_out_back))
 
         self.play(

@@ -4,382 +4,448 @@ import numpy as np
 
 
 class SelfPlayScene(Scene):
-    """Scene 8 – Self-play as data generation."""
+    """Scene 8 – Self-play as data generation.
 
-    BG       = "#000000"
-    C_NET    = "#A78BFA"   # purple — network
-    C_PLAY   = "#5B9BD5"   # blue   — self-play games
-    C_SEARCH = "#F0A500"   # orange — tree search
-    C_DATA   = "#50C878"   # green  — training examples
-    C_POLICY = "#F0A500"
-    C_VALUE  = "#5B9BD5"
-    C_LOSS   = "#FF6B6B"
+    Layout: board (left) | network (right) | data strip (bottom).
+    The scene runs like a factory: game → search targets → z labels → network update.
+    """
+
+    BG        = "#000000"
+    BOARD_COL = "#131210"
+    GRID_COL  = "#4A4438"
+    BLACK_COL = "#1A1A1A"
+    WHITE_COL = "#F0F0F0"
+    C_NET     = "#A78BFA"   # purple  — network / θ
+    C_SEARCH  = "#F0A500"   # orange  — search / policy
+    C_VALUE   = "#50C878"   # green   — outcome / z
+    C_DATA    = "#5B9BD5"   # blue    — neutral data
+
+    N       = 5
+    SIDE    = 2.05
+    STONE_R = 0.135
+    BC      = np.array([-3.3,  0.40, 0.0])   # board centre
+    NC      = np.array([ 3.3,  0.40, 0.0])   # network centre
+    CARD_Y  = -2.80                           # y of the data strip
 
     def construct(self):
         self.camera.background_color = self.BG
-        self._phase_intro()
-        self._phase_loop()
-        self._phase_training_targets()
-        self._phase_library_comparison()
+        self.SP      = self.SIDE / (self.N - 1)
+        self._stones = VGroup()
+
+        self._build_layout()
+        self._phase_self_play()
+        self._phase_search_targets()
+        self._phase_result_labels()
+        self._phase_network_update()
+        self._phase_accelerated_loop()
         self._phase_closing()
 
-    # ── helpers ───────────────────────────────────────────────────────────────
+    # ── coordinate helpers ────────────────────────────────────────────────────
 
-    def _loop_node(self, label, color, pos, width=2.1):
-        box = RoundedRectangle(
-            width=width, height=0.68, corner_radius=0.14,
-            fill_color=color, fill_opacity=0.13,
-            stroke_color=color, stroke_width=2.0,
+    def gp(self, i, j):
+        return np.array([
+            self.BC[0] - self.SIDE / 2 + i * self.SP,
+            self.BC[1] - self.SIDE / 2 + j * self.SP,
+            0.0,
+        ])
+
+    def _stone(self, i, j, col):
+        c = Circle(radius=self.STONE_R)
+        c.set_fill(col, opacity=1)
+        c.set_stroke(
+            color="#C0C0C0" if col == self.WHITE_COL else "#383838",
+            width=0.8,
         )
-        box.move_to(pos)
-        lbl = Text(label, font_size=19, color=color)
-        lbl.move_to(pos)
+        c.move_to(self.gp(i, j))
+        return c
+
+    def _net_dot(self, pos, opacity=0.78):
+        d = Dot(pos, radius=0.11, color=self.C_NET)
+        d.set_fill(self.C_NET, opacity=opacity)
+        d.set_stroke(color=self.C_NET, width=1.0)
+        return d
+
+    def _data_card(self, tex_str, col=None, w=1.75, h=0.52):
+        col = col or self.C_DATA
+        box = RoundedRectangle(
+            width=w, height=h, corner_radius=0.10,
+            fill_color=col, fill_opacity=0.13,
+            stroke_color=col, stroke_width=1.6,
+        )
+        lbl = MathTex(tex_str, font_size=17, color=col)
+        lbl.move_to(box.get_center())
         return VGroup(box, lbl)
 
-    def _glow_pulse(self, center, color, base_r=0.48):
-        ring = Circle(
-            radius=base_r, fill_opacity=0,
-            stroke_color=color, stroke_width=4.0,
+    # ── static layout ─────────────────────────────────────────────────────────
+
+    def _build_layout(self):
+        # Board
+        board_sq = Square(side_length=self.SIDE + 0.26)
+        board_sq.set_fill(self.BOARD_COL, opacity=1).set_stroke(width=0)
+        board_sq.move_to(self.BC)
+
+        s2   = self.SIDE / 2
+        grid = VGroup()
+        for k in range(self.N):
+            t = -s2 + k * self.SP
+            grid.add(Line(
+                [self.BC[0] + t, self.BC[1] - s2, 0],
+                [self.BC[0] + t, self.BC[1] + s2, 0],
+                color=self.GRID_COL, stroke_width=1.2,
+            ))
+            grid.add(Line(
+                [self.BC[0] - s2, self.BC[1] + t, 0],
+                [self.BC[0] + s2, self.BC[1] + t, 0],
+                color=self.GRID_COL, stroke_width=1.2,
+            ))
+
+        # Neural network  (3 → 3 → 1 layout)
+        lx = [self.NC[0] - 0.78, self.NC[0], self.NC[0] + 0.78]
+        ly = [[0.52, 0.0, -0.52], [0.28, -0.28], [0.0]]
+
+        net_layers = []
+        all_dots   = VGroup()
+        for x, ys in zip(lx, ly):
+            layer = [self._net_dot(np.array([x, self.NC[1] + y, 0.0])) for y in ys]
+            net_layers.append(layer)
+            all_dots.add(*layer)
+
+        edges = VGroup()
+        for a, b in zip(net_layers[:-1], net_layers[1:]):
+            for na in a:
+                for nb in b:
+                    edges.add(Line(
+                        na.get_center(), nb.get_center(),
+                        color=self.C_NET, stroke_width=0.75, stroke_opacity=0.35,
+                    ))
+
+        glow_box = RoundedRectangle(
+            width=2.1, height=2.3, corner_radius=0.22,
+            fill_color=self.C_NET, fill_opacity=0.06,
+            stroke_color=self.C_NET, stroke_width=1.8, stroke_opacity=0.65,
         )
-        ring.move_to(center)
-        return ring
+        glow_box.move_to(self.NC)
 
-    # ── phases ────────────────────────────────────────────────────────────────
+        theta_lbl = MathTex(r"\theta_0", font_size=38, color=self.C_NET)
+        theta_lbl.next_to(glow_box, UP, buff=0.20)
 
-    def _phase_intro(self):
-        q = Tex(
-            r"Where does the training data come from?",
-            font_size=38, color=WHITE,
-        )
-        q.move_to(ORIGIN)
-        self.play(FadeIn(q, shift=UP * 0.1), run_time=0.85)
-        self.wait(1.0)
-
-        ans = Tex(r"Self-play.", font_size=56, color=self.C_NET)
-        ans.move_to(DOWN * 0.95)
+        # Appear together
+        self.play(GrowFromCenter(board_sq), GrowFromCenter(glow_box), run_time=0.55)
         self.play(
-            q.animate.shift(UP * 0.9).set_opacity(0.28),
-            GrowFromCenter(ans),
-            run_time=0.85,
+            LaggedStart(*[Create(l) for l in grid], lag_ratio=0.02),
+            Create(edges),
+            LaggedStart(*[GrowFromCenter(d) for d in all_dots], lag_ratio=0.07),
+            Write(theta_lbl),
+            run_time=0.9,
         )
-        self.wait(1.1)
-        self.play(FadeOut(VGroup(q, ans)), run_time=0.6)
-        self.wait(0.1)
 
-    def _phase_loop(self):
-        # Five nodes on a circle, top-to-bottom clockwise flow
-        cx, cy, r = 0.0, 0.1, 2.35
-        n = 5
-        # start at top (π/2), go clockwise → subtract angle each step
-        raw_angles = [np.pi / 2 - i * 2 * np.pi / n for i in range(n)]
+        self._board_sq    = board_sq
+        self._grid        = grid
+        self._glow_box    = glow_box
+        self._net_edges   = edges
+        self._net_dots    = all_dots
+        self._net_layers  = net_layers
+        self._theta_lbl   = theta_lbl
 
-        node_specs = [
-            ("current network",    self.C_NET,    2.15),
-            ("self-play games",    self.C_PLAY,   2.05),
-            ("tree search",        self.C_SEARCH, 1.70),
-            ("training examples",  self.C_DATA,   2.15),
-            ("updated network",    self.C_NET,    2.15),
-        ]
-        positions = [
-            np.array([cx + r * np.cos(a), cy + r * np.sin(a), 0.0])
-            for a in raw_angles
-        ]
-        nodes = [
-            self._loop_node(lbl, col, pos, w)
-            for (lbl, col, w), pos in zip(node_specs, positions)
-        ]
+    # ── phase 1: network plays both sides ─────────────────────────────────────
 
-        # Arrows between consecutive nodes (straight, buffered past box edges)
-        arrows = []
-        for i in range(n):
-            src, dst = positions[i], positions[(i + 1) % n]
-            col = node_specs[i][1]
-            arr = Arrow(
-                src, dst,
-                color=GRAY_D, stroke_width=2.5,
-                max_tip_length_to_length_ratio=0.13,
-                buff=0.40,
+    def _phase_self_play(self):
+        banner = Tex(
+            r"network $\theta$ plays \textbf{both sides}",
+            font_size=22, color=self.C_NET,
+        )
+        banner.to_edge(UP, buff=0.38)
+        self.play(FadeIn(banner, shift=DOWN * 0.08), run_time=0.42)
+        self.wait(0.18)
+
+        # Sequence of 10 moves — alternating black / white
+        move_seq = [
+            (2, 2, self.BLACK_COL), (2, 3, self.WHITE_COL),
+            (1, 2, self.BLACK_COL), (3, 2, self.WHITE_COL),
+            (2, 1, self.BLACK_COL), (3, 3, self.WHITE_COL),
+            (1, 3, self.BLACK_COL), (3, 1, self.WHITE_COL),
+            (0, 2, self.BLACK_COL), (4, 2, self.WHITE_COL),
+        ]
+        for i, j, col in move_seq:
+            s     = self._stone(i, j, col)
+            pulse = Circle(
+                radius=self.STONE_R * 1.55, fill_opacity=0,
+                stroke_color=self.C_NET, stroke_width=1.8,
             )
-            arrows.append(arr)
-
-        # Build the loop node-by-node
-        self.play(GrowFromCenter(nodes[0]), run_time=0.45)
-        for i in range(n - 1):
-            self.play(
-                GrowArrow(arrows[i]),
-                GrowFromCenter(nodes[i + 1]),
-                run_time=0.50,
-            )
-        self.play(GrowArrow(arrows[n - 1]), run_time=0.45)
-        self.wait(0.5)
-
-        # Animate the loop 3 times; network node brightens each pass
-        arc_colors = [s[1] for s in node_specs]
-        for iteration in range(3):
-            fill_boost = 0.14 * iteration
-            for i in range(n):
-                next_i = (i + 1) % n
-                self.play(
-                    arrows[i].animate.set_color(arc_colors[i]).set_stroke(width=3.5),
-                    nodes[next_i][0].animate.set_fill(
-                        arc_colors[next_i],
-                        opacity=0.22 + fill_boost,
-                    ),
-                    run_time=0.28,
-                )
-
-            # Network glow pulse at top node
-            pulse = self._glow_pulse(positions[0], self.C_NET, base_r=0.50)
+            pulse.move_to(self.gp(i, j))
             self.add(pulse)
             self.play(
-                pulse.animate.scale(2.4).set_stroke(opacity=0.0),
-                nodes[0][0].animate.set_fill(self.C_NET, opacity=0.25 + 0.15 * (iteration + 1)),
-                run_time=0.55,
-                rate_func=ease_out_quad,
+                GrowFromCenter(s),
+                pulse.animate.scale(3.4).set_opacity(0),
+                run_time=0.20, rate_func=ease_out_quad,
             )
             self.remove(pulse)
+            self._stones.add(s)
 
-            # Dim arrows back
-            for arr in arrows:
-                arr.set_color(GRAY_D).set_stroke(width=2.5)
-            self.wait(0.15)
+        self.wait(0.30)
+        self.play(FadeOut(banner), run_time=0.28)
 
-        curriculum_lbl = Tex(
-            r"The system generates its own curriculum.",
-            font_size=26, color=GRAY_C,
-        )
-        curriculum_lbl.to_edge(DOWN, buff=0.52)
-        self.play(FadeIn(curriculum_lbl, shift=UP * 0.1), run_time=0.65)
-        self.wait(1.6)
-        self.play(
-            FadeOut(VGroup(*nodes, *arrows, curriculum_lbl)),
-            run_time=1.0,
-        )
-        self.wait(0.2)
+    # ── phase 2: search produces policy targets ────────────────────────────────
 
-    def _phase_training_targets(self):
-        header = MathTex(
-            r"\text{For each position } s_t \text{ :}",
-            font_size=34, color=GRAY_B,
-        )
-        header.move_to(UP * 2.85)
-
-        # ── target row ────────────────────────────────────────────────────────
-        pol_key = MathTex(r"\text{target policy:}", font_size=26, color=GRAY_C)
-        pol_val = MathTex(r"\pi_t", font_size=52, color=self.C_POLICY)
-        pol_row = VGroup(pol_key, pol_val).arrange(RIGHT, buff=0.35)
-
-        out_key = MathTex(r"\text{game outcome:}", font_size=26, color=GRAY_C)
-        out_val = MathTex(r"z \;\in\; \{-1,\;+1\}", font_size=42, color=self.C_VALUE)
-        out_row = VGroup(out_key, out_val).arrange(RIGHT, buff=0.35)
-
-        targets = VGroup(pol_row, out_row).arrange(DOWN, buff=0.5, aligned_edge=LEFT)
-        targets.move_to(UP * 1.35)
-
-        # ── divider ───────────────────────────────────────────────────────────
-        span_x = max(targets.get_right()[0], 3.8)
-        divider = Line(
-            np.array([-span_x, 0.0, 0.0]),
-            np.array([ span_x, 0.0, 0.0]),
-            color=GRAY_E, stroke_width=1.0,
-        ).shift(DOWN * 0.22)
-
-        # ── train equations ───────────────────────────────────────────────────
-        train_lbl = Text("train:", font_size=24, color=GRAY_C)
-
-        eq_pol = MathTex(
-            r"\pi_\theta(\cdot \mid s_t)", r"\;\approx\;", r"\pi_t",
-            font_size=38,
-        )
-        eq_pol[0].set_color(self.C_NET)
-        eq_pol[2].set_color(self.C_POLICY)
-
-        eq_val = MathTex(
-            r"V_\theta(s_t)", r"\;\approx\;", r"z",
-            font_size=38,
-        )
-        eq_val[0].set_color(self.C_NET)
-        eq_val[2].set_color(self.C_VALUE)
-
-        train_eqs = VGroup(eq_pol, eq_val).arrange(DOWN, buff=0.38, aligned_edge=LEFT)
-        train_block = VGroup(train_lbl, train_eqs).arrange(RIGHT, buff=0.4)
-        train_block.move_to(DOWN * 1.45)
-
-        self.play(Write(header), run_time=0.65)
-        self.play(
-            LaggedStart(
-                FadeIn(pol_row, shift=RIGHT * 0.12),
-                FadeIn(out_row, shift=RIGHT * 0.12),
-                lag_ratio=0.42,
-            ),
-            run_time=0.9,
-        )
-        self.wait(0.35)
-        self.play(Create(divider), run_time=0.5)
-        self.play(
-            FadeIn(train_lbl, shift=RIGHT * 0.1),
-            LaggedStart(Write(eq_pol), Write(eq_val), lag_ratio=0.5),
-            run_time=1.4,
-        )
-        self.wait(1.8)
-
-        # Emphasise: πt came from search, not human records
-        search_note = Tex(
-            r"$\pi_t$ is produced by tree search — not copied from human games",
+    def _phase_search_targets(self):
+        banner = Tex(
+            r"search $\;\to\;$ target policy $\pi_t$",
             font_size=22, color=self.C_SEARCH,
         )
-        search_note.to_edge(DOWN, buff=0.52)
-        self.play(
-            eq_pol[2].animate.set_color(self.C_SEARCH),
-            FadeIn(search_note, shift=UP * 0.1),
-            run_time=0.7,
-        )
-        self.wait(1.8)
-        self.play(
-            FadeOut(VGroup(
-                header, targets, divider, train_block, search_note,
-            )),
-            run_time=0.9,
-        )
-        self.wait(0.2)
+        banner.to_edge(UP, buff=0.38)
+        self.play(FadeIn(banner, shift=DOWN * 0.08), run_time=0.38)
 
-    def _phase_library_comparison(self):
-        v_line = DashedLine(
-            UP * 3.5, DOWN * 3.5,
-            color=GRAY_E, stroke_width=1.2, dash_length=0.2,
-        )
+        # Cells that are empty after the move sequence
+        empty = [
+            (0, 0), (1, 0), (0, 1), (4, 0), (4, 1),
+            (0, 3), (0, 4), (4, 3), (4, 4), (1, 4), (3, 4),
+        ]
 
-        left_title = Text("Human games", font_size=26, color=GRAY_B)
-        left_sub   = Text("finite cultural history", font_size=19, color=GRAY_D)
-        left_title.move_to(LEFT * 3.3 + UP * 2.75)
-        left_sub.next_to(left_title, DOWN, buff=0.14)
+        # Three card positions in the data strip
+        card_xs  = [-4.2, -2.2, -0.2]
+        self._saved_cards = []
 
-        right_title = Text("Self-play games", font_size=26, color=self.C_NET)
-        right_sub   = Text("generated experience", font_size=19, color=GRAY_D)
-        right_title.move_to(RIGHT * 3.3 + UP * 2.75)
-        right_sub.next_to(right_title, DOWN, buff=0.14)
+        for pos_i, cx in enumerate(card_xs):
+            rng    = np.random.default_rng(pos_i * 11 + 5)
+            chosen = rng.choice(len(empty), size=5, replace=False)
 
-        self.play(
-            Create(v_line),
-            FadeIn(left_title, shift=RIGHT * 0.1),
-            FadeIn(right_title, shift=LEFT * 0.1),
-            run_time=0.8,
-        )
-        self.play(
-            FadeIn(left_sub, shift=UP * 0.05),
-            FadeIn(right_sub, shift=UP * 0.05),
-            run_time=0.5,
-        )
-        self.wait(0.3)
+            # Heatmap: circles on empty intersections, varying size/opacity
+            heat = VGroup()
+            for rank, cell_idx in enumerate(chosen):
+                ci, cj = empty[cell_idx]
+                alpha  = 0.85 - rank * 0.13
+                r      = self.STONE_R * (0.38 + 0.42 * alpha)
+                dot    = Circle(radius=r)
+                dot.set_fill(self.C_SEARCH, opacity=alpha)
+                dot.set_stroke(width=0)
+                dot.move_to(self.gp(ci, cj))
+                heat.add(dot)
 
-        # ── left: fixed stack of "book" slabs ────────────────────────────────
-        def _slab(x, y, w, h, col, op):
-            r = Rectangle(width=w, height=h)
-            r.set_fill(col, opacity=op).set_stroke(color=col, width=0.8, opacity=0.6)
-            r.move_to(np.array([x, y, 0.0]))
-            return r
+            # Visit counter rising on the top-ranked candidate (heat[0])
+            visit = MathTex("12", font_size=18, color=self.C_SEARCH)
+            visit.next_to(heat[0], UP, buff=0.05)
 
-        human_slabs = VGroup(
-            _slab(-4.25, 0.6,  0.32, 1.8, GRAY_C, 0.50),
-            _slab(-3.88, 0.5,  0.32, 1.6, GRAY_C, 0.42),
-            _slab(-3.51, 0.65, 0.32, 1.9, GRAY_D, 0.48),
-            _slab(-3.16, 0.55, 0.28, 1.5, GRAY_C, 0.38),
-            _slab(-2.82, 0.60, 0.30, 1.7, GRAY_D, 0.44),
-        )
-        h_brace = Brace(human_slabs, DOWN, color=GRAY_C, buff=0.10)
-        h_count = Text("~500K games", font_size=18, color=GRAY_C)
-        h_count.next_to(h_brace, DOWN, buff=0.08)
-
-        self.play(
-            LaggedStart(*[GrowFromCenter(s) for s in human_slabs], lag_ratio=0.10),
-            run_time=0.85,
-        )
-        self.play(GrowFromCenter(h_brace), FadeIn(h_count, shift=UP * 0.05), run_time=0.55)
-        self.wait(0.6)
-
-        # ── right: self-play stack that keeps growing ─────────────────────────
-        batch_labels = ["500K", "5M", "50M", "500M+"]
-        batch_cols = [self.C_NET] * 4
-
-        sp_batches = []
-        sp_brace   = None
-        sp_count_lbl = None
-
-        base_x = 3.3
-        for batch_i in range(4):
-            grp = VGroup()
-            y_center = -0.4 + batch_i * 0.62
-            col = batch_cols[batch_i]
-            op  = 0.22 + batch_i * 0.10
-            for k in range(5):
-                grp.add(_slab(
-                    base_x + (k - 2) * 0.40,
-                    y_center + k * 0.04,
-                    0.34, 0.55 + batch_i * 0.08,
-                    col, min(op + k * 0.03, 0.85),
-                ))
-            sp_batches.append(grp)
-
-            new_brace = Brace(
-                VGroup(*sp_batches),
-                DOWN, color=self.C_NET, buff=0.10,
+            self.play(
+                LaggedStart(*[GrowFromCenter(d) for d in heat], lag_ratio=0.06),
+                run_time=0.32,
             )
-            new_count = Text(batch_labels[batch_i] + " games", font_size=18, color=self.C_NET)
-            new_count.next_to(new_brace, DOWN, buff=0.08)
+            self.play(FadeIn(visit), run_time=0.16)
 
-            if batch_i == 0:
-                self.play(
-                    LaggedStart(*[GrowFromCenter(s) for s in grp], lag_ratio=0.08),
-                    GrowFromCenter(new_brace),
-                    FadeIn(new_count, shift=UP * 0.05),
-                    run_time=0.75,
-                )
-                sp_brace     = new_brace
-                sp_count_lbl = new_count
-            else:
-                self.play(
-                    LaggedStart(*[GrowFromCenter(s) for s in grp], lag_ratio=0.06),
-                    Transform(sp_brace, new_brace),
-                    Transform(sp_count_lbl, new_count),
-                    run_time=0.55,
-                )
-            self.wait(0.15)
+            for count in ["41", "108"]:
+                new_v = MathTex(count, font_size=18, color=self.C_SEARCH)
+                new_v.move_to(visit.get_center())
+                self.play(Transform(visit, new_v), run_time=0.16)
 
-        self.wait(1.0)
+            # Spawn a data card from the board, slide it to the strip
+            card = self._data_card(
+                rf"s_{{{pos_i+1}}},\;\pi_{{{pos_i+1}}}",
+                col=self.C_DATA,
+            )
+            card.move_to(self._board_sq.get_center())
+            self.play(
+                FadeOut(heat), FadeOut(visit), GrowFromCenter(card),
+                run_time=0.26,
+            )
+            self.play(
+                card.animate.move_to(np.array([cx, self.CARD_Y, 0.0])),
+                run_time=0.38, rate_func=ease_out_quad,
+            )
+            self._saved_cards.append(card)
 
-        not_history = Tex(
-            r"Not learning from history. \ Building its own.",
-            font_size=28, color=WHITE,
+        self.play(FadeOut(banner), run_time=0.26)
+
+    # ── phase 3: game ends; z flows backward into each card ───────────────────
+
+    def _phase_result_labels(self):
+        end_banner = Tex("Game over", font_size=22, color=GRAY_C)
+        end_banner.to_edge(UP, buff=0.38)
+        self.play(FadeIn(end_banner, shift=DOWN * 0.08), run_time=0.32)
+
+        result_box = RoundedRectangle(
+            width=3.1, height=0.78, corner_radius=0.14,
+            fill_color=self.C_VALUE, fill_opacity=0.14,
+            stroke_color=self.C_VALUE, stroke_width=2.2,
         )
-        not_history.to_edge(DOWN, buff=0.52)
-        self.play(FadeIn(not_history, shift=UP * 0.1), run_time=0.75)
-        self.wait(2.2)
+        result_box.move_to(self._board_sq.get_center())
+        result_tex = MathTex(
+            r"\text{Black wins} \quad z = +1",
+            font_size=28, color=self.C_VALUE,
+        )
+        result_tex.move_to(result_box.get_center())
 
+        self.play(GrowFromCenter(result_box), Write(result_tex), run_time=0.65)
+        self.wait(0.42)
+
+        # z signal travels from the result box into each saved card
+        for idx, card in enumerate(self._saved_cards):
+            z_dot = Dot(
+                result_box.get_center(), radius=0.11,
+                color=self.C_VALUE,
+            )
+            z_dot.set_fill(self.C_VALUE, opacity=0.9)
+            self.add(z_dot)
+            self.play(
+                z_dot.animate.move_to(card.get_center()).scale(0.45).set_opacity(0),
+                run_time=0.30, rate_func=smooth,
+            )
+            self.remove(z_dot)
+
+            new_card = self._data_card(
+                rf"s_{{{idx+1}}},\;\pi_{{{idx+1}}},\;+1",
+                col=self.C_VALUE, w=2.05,
+            )
+            new_card.move_to(card.get_center())
+            self.play(Transform(card, new_card), run_time=0.35)
+
+        self.wait(0.38)
+        self.play(FadeOut(VGroup(result_box, result_tex, end_banner)), run_time=0.35)
+
+    # ── phase 4: cards stream into network; θ₀ → θ₁ ─────────────────────────
+
+    def _phase_network_update(self):
+        banner = Tex(
+            r"$\pi_\theta \to \pi_t \qquad V_\theta \to z$",
+            font_size=22, color=GRAY_C,
+        )
+        banner.to_edge(UP, buff=0.38)
+        self.play(FadeIn(banner, shift=DOWN * 0.08), run_time=0.35)
+
+        for card in self._saved_cards:
+            ghost = card.copy()
+            self.add(ghost)
+            self.play(
+                FadeOut(card),
+                ghost.animate.move_to(self.NC).scale(0.25),
+                self._glow_box.animate.set_fill(opacity=0.22),
+                run_time=0.36, rate_func=smooth,
+            )
+            self.play(
+                FadeOut(ghost),
+                self._glow_box.animate.set_fill(opacity=0.08),
+                run_time=0.18,
+            )
+
+        # Weight pulse
         self.play(
-            FadeOut(VGroup(
-                v_line,
-                left_title, left_sub, right_title, right_sub,
-                human_slabs, h_brace, h_count,
-                *sp_batches, sp_brace, sp_count_lbl,
-                not_history,
-            )),
-            run_time=1.0,
+            *[d.animate.set_fill(self.C_NET, opacity=1.0) for d in self._net_dots],
+            self._net_edges.animate.set_stroke(opacity=0.82),
+            self._glow_box.animate.set_fill(opacity=0.26).set_stroke(width=2.8),
+            run_time=0.38,
         )
-        self.wait(0.2)
+        self.play(
+            *[d.animate.set_fill(self.C_NET, opacity=0.80) for d in self._net_dots],
+            self._net_edges.animate.set_stroke(opacity=0.42),
+            self._glow_box.animate.set_fill(opacity=0.11),
+            run_time=0.32,
+        )
+
+        new_lbl = MathTex(r"\theta_1", font_size=38, color=self.C_NET)
+        new_lbl.move_to(self._theta_lbl.get_center())
+        self.play(Transform(self._theta_lbl, new_lbl), run_time=0.42)
+        self.wait(0.28)
+        self.play(FadeOut(banner), run_time=0.25)
+
+    # ── phase 5: accelerated loop — θ₁→θ₂→θ₃ ────────────────────────────────
+
+    def _phase_accelerated_loop(self):
+        loop_moves = [
+            # cycle 0: θ₁ → θ₂
+            [(2, 2, self.BLACK_COL), (1, 3, self.WHITE_COL),
+             (3, 1, self.BLACK_COL), (2, 4, self.WHITE_COL),
+             (0, 2, self.BLACK_COL), (4, 2, self.WHITE_COL)],
+            # cycle 1: θ₂ → θ₃
+            [(2, 2, self.BLACK_COL), (3, 3, self.WHITE_COL),
+             (1, 1, self.BLACK_COL), (4, 0, self.WHITE_COL),
+             (2, 4, self.BLACK_COL)],
+        ]
+
+        for cycle, moves in enumerate(loop_moves):
+            theta_next = cycle + 2
+
+            # Board clears
+            self.play(FadeOut(self._stones), run_time=0.20)
+            self._stones = VGroup()
+
+            # Rapid moves — each cycle is quicker
+            move_rt = 0.12 - cycle * 0.02
+            for i, j, col in moves:
+                s     = self._stone(i, j, col)
+                pulse = Circle(
+                    radius=self.STONE_R * 1.3, fill_opacity=0,
+                    stroke_color=self.C_NET, stroke_width=1.5,
+                )
+                pulse.move_to(self.gp(i, j))
+                self.add(pulse)
+                self.play(
+                    GrowFromCenter(s),
+                    pulse.animate.scale(2.8).set_opacity(0),
+                    run_time=move_rt, rate_func=ease_out_quad,
+                )
+                self.remove(pulse)
+                self._stones.add(s)
+
+            # Flash data cards in the strip
+            flash_cards = VGroup()
+            for k in range(3):
+                c = self._data_card(
+                    rf"(s_{{{k+1}}},\;\pi_{{{k+1}}},\;+1)",
+                    col=self.C_VALUE, w=2.12,
+                )
+                c.move_to(np.array([-3.9 + k * 1.95, self.CARD_Y, 0.0]))
+                flash_cards.add(c)
+
+            self.play(
+                LaggedStart(*[GrowFromCenter(c) for c in flash_cards], lag_ratio=0.10),
+                run_time=0.38,
+            )
+
+            # Stream all cards into network
+            fill_op  = 0.20 + 0.10 * (cycle + 1)
+            stroke_w = 2.6 + 0.5 * (cycle + 1)
+            self.play(
+                flash_cards.animate.move_to(self.NC).scale(0.20),
+                self._glow_box.animate.set_fill(opacity=fill_op).set_stroke(width=stroke_w),
+                *[d.animate.set_fill(self.C_NET, opacity=1.0) for d in self._net_dots],
+                run_time=0.40, rate_func=ease_out_quad,
+            )
+            self.play(
+                FadeOut(flash_cards),
+                *[d.animate.set_fill(self.C_NET, opacity=0.80 + 0.07 * (cycle + 1))
+                  for d in self._net_dots],
+                self._glow_box.animate.set_fill(opacity=0.12 + 0.06 * (cycle + 1)),
+                run_time=0.26,
+            )
+
+            new_lbl = MathTex(rf"\theta_{theta_next}", font_size=38, color=self.C_NET)
+            new_lbl.move_to(self._theta_lbl.get_center())
+            self.play(Transform(self._theta_lbl, new_lbl), run_time=0.35)
+            self.wait(0.12)
+
+    # ── phase 6: closing ──────────────────────────────────────────────────────
 
     def _phase_closing(self):
-        l1 = Tex(
-            r"The machine is not learning only from human games.",
-            font_size=30, color=GRAY_B,
+        # Final network glow
+        outer_ring = Circle(
+            radius=1.4, fill_opacity=0,
+            stroke_color=self.C_NET, stroke_width=6.0,
         )
-        l2 = Tex(
-            r"It is generating its own curriculum.",
-            font_size=36, color=WHITE,
+        outer_ring.move_to(self.NC)
+        self.add(outer_ring)
+        self.play(
+            outer_ring.animate.scale(2.5).set_opacity(0),
+            self._glow_box.animate.set_fill(opacity=0.36).set_stroke(
+                width=3.2, opacity=1.0
+            ),
+            run_time=0.85, rate_func=ease_out_quad,
         )
-        VGroup(l1, l2).arrange(DOWN, buff=0.55).move_to(ORIGIN)
+        self.remove(outer_ring)
+        self.wait(0.28)
 
-        self.play(FadeIn(l1, shift=UP * 0.12), run_time=0.9)
-        self.wait(0.55)
-        self.play(FadeIn(l2, shift=UP * 0.12), run_time=0.9)
-        self.wait(3.2)
-        self.play(FadeOut(VGroup(l1, l2)), run_time=0.9)
+        closing = Tex(
+            r"The machine builds its own curriculum.",
+            font_size=34, color=WHITE,
+        )
+        closing.to_edge(DOWN, buff=0.55)
+        self.play(FadeIn(closing, shift=UP * 0.12), run_time=0.9)
+        self.wait(3.6)
+        self.play(FadeOut(closing), run_time=0.8)

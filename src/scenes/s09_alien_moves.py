@@ -34,7 +34,7 @@ class AlienMovesScene(ThreeDScene):
         self._phase_questions()
         self._phase_stats()
 
-        self.wait(2.0)
+        self.wait(20.0)
 
     # ── board helpers ─────────────────────────────────────────────────────────
 
@@ -48,7 +48,10 @@ class AlienMovesScene(ThreeDScene):
 
     def _stone(self, color):
         r = self._stone_r()
-        s = Sphere(radius=r, resolution=(18, 18), checkerboard_colors=[color, color])
+        sc = "#C0C0C0" if color == self.WHITE_STONE else "#2A2A2A"
+        s = Circle(radius=r)
+        s.set_fill(color, opacity=1)
+        s.set_stroke(color=sc, width=0.8)
         return s
 
     def _build_board_instant(self):
@@ -88,8 +91,7 @@ class AlienMovesScene(ThreeDScene):
             (1,4),(3,4),(1,5),(3,2),(4,3),(3,1),(2,6),
             (9,3),(2,12),(4,15),(16,13),(16,14),(15,13),(13,15),(15,10),
         ]
-        r = self._stone_r()
-        sz = r  # sphere center sits one radius above the board surface
+        sz = 0.025
 
         stones = VGroup()
         for idx, (cx, cy) in enumerate(prior_moves):
@@ -156,3 +158,13 @@ class AlienMovesScene(ThreeDScene):
         )
         self.wait(3.5)
         self.play(FadeOut(row), run_time=1.0)
+
+
+class AlienMovesPreview(AlienMovesScene):
+    """Single-frame board check. Run: manim -s -ql src/scenes/s09_alien_moves.py AlienMovesPreview"""
+
+    def construct(self):
+        self.SPACING = self.BOARD_SIZE / 18
+        self.camera.background_color = self.BG
+        self.set_camera_orientation(phi=65 * DEGREES, theta=-128 * DEGREES)
+        self._build_board_instant()
