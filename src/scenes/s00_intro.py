@@ -38,14 +38,14 @@ class Move37ColdOpen(ThreeDScene):
         attention = self.create_attention_field()
         caption = self.create_attention_caption()
         self.add_fixed_in_frame_mobjects(caption)
-        self.play(FadeIn(attention), FadeIn(caption), run_time=2.2, rate_func=smooth)
+        self.play(FadeIn(attention), Write(caption), run_time=2.2, rate_func=smooth)
         self.wait(1.5)
 
         self.play_move_37()
 
         annotation = self.create_move37_annotation()
         self.add_fixed_in_frame_mobjects(annotation)
-        self.play(FadeIn(annotation), run_time=0.9, rate_func=smooth)
+        self.play(Write(annotation), run_time=0.9, rate_func=smooth)
         self.wait(2.2)
         self.play(FadeOut(attention), FadeOut(caption), FadeOut(annotation), run_time=1.2)
         self.wait(0.8)
@@ -230,12 +230,12 @@ class Move37ColdOpen(ThreeDScene):
         lbl_color = ManimColor("#505050")
 
         labels = VGroup(
-            Text("Human prior",   font_size=20, color=lbl_color),
-            Text("Machine value", font_size=20, color=lbl_color),
+            Tex("Human prior",   font_size=20, color=lbl_color),
+            Tex("Machine value", font_size=20, color=lbl_color),
         )
         values = VGroup(
-            Text("unlikely", font_size=20, color=ManimColor("#787878")),
-            Text("high",     font_size=20, color=ManimColor("#D49A22")),
+            Tex("unlikely", font_size=20, color=ManimColor("#787878")),
+            Tex("high",     font_size=20, color=ManimColor("#D49A22")),
         )
 
         labels.arrange(DOWN, aligned_edge=LEFT,  buff=0.20)
@@ -255,8 +255,8 @@ class Move37ColdOpen(ThreeDScene):
         swatch.set_fill(amber, opacity=1)
         swatch.set_stroke(width=0)
 
-        line1 = Text("where the obvious", font_size=20, color=text_color)
-        line2 = Text("fight seems to be", font_size=20, color=text_color)
+        line1 = Tex("where the obvious", font_size=20, color=text_color)
+        line2 = Tex("fight seems to be", font_size=20, color=text_color)
         lines = VGroup(line1, line2).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
 
         legend = VGroup(swatch, lines)
